@@ -18,10 +18,12 @@
     "@anthropic-ai/sdk": "^0.71.2",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "firebase": "^12.8.0",
     "firebase-admin": "^13.6.0",
     "openai": "^6.16.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "serverless-http": "^3.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.1.2",

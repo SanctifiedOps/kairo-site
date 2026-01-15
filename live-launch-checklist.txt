@@ -1,0 +1,33 @@
+KAIRO Live Checklist
+
+1) Live alignment
+   - Confirm backend host/domain (where /api/last and /api/status live).
+   - Confirm frontend domain can reach backend (same host, proxy, or base URL).
+   - Verify /api/status and /api/last return current cycle data.
+   - Confirm backend runs on a long-lived Node host (not static-only).
+
+2) Firebase setup
+   - Ensure Firestore is enabled (Native mode).
+   - Provide service account credentials.
+     - Preferred: set FIREBASE_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS.
+     - Alternative: store JSON in env and use admin.credential.cert.
+   - Confirm Firestore collections: state, cycles, stances, memory, config, events.
+   - Add Firestore index if prompted: stances on cycleId + stance.
+
+3) Minimum token holdings (100k to vote)
+   - Need token mint address.
+   - Need token decimals.
+   - Need network (mainnet/devnet) and RPC endpoint.
+   - Enforce check server-side in POST /api/stance.
+
+4) Auto tweet each transmission
+   - Need X/Twitter API credentials.
+   - Choose auth method: OAuth 1.0a or OAuth 2.0.
+   - Decide when to tweet: every cycle or only after vote close.
+   - Add feature flag to toggle tweeting.
+
+Notes/Decisions
+   - Backend host: TBD
+   - Token mint/decimals/RPC: TBD
+   - X credentials/auth: TBD
+   - Tweet timing: TBD

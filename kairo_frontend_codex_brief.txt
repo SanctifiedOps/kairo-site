@@ -1,5 +1,5 @@
 KAIRO FRONTEND BRIEF (FOR CODEX) — VITE + REACT (HTML/CSS/JS ONLY)
-Version: v0.1
+Version: v0.x
 Goal: Build an obscure, dystopian, glitchy terminal-like interface that feels like a recovered monitoring console. Minimal UI. High intentionality. No hype. No gamified UI elements. No emojis.
 
 ------------------------------------------------------------------

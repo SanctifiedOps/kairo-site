@@ -1,5 +1,5 @@
 KAIRO — LLM-TO-LLM DELIBERATION ENGINE SPEC (FOR CODEX)
-Version: v0.4 (Claude OPUS + OpenAI AUDITOR)
+Version: v0.x (Claude OPUS + OpenAI AUDITOR)
 Stack: Firebase Functions (Node) + Firestore + Anthropic (Claude) + OpenAI
 Cadence: every 5 minutes
 Output: one final “Transmission” per cycle + optional 1-line “trace”
@@ -61,7 +61,7 @@ Required:
 - ANTHROPIC_API_KEY=...
 - OPENAI_API_KEY=...
 - ADMIN_KEY=...
-- PROJECT_VERSION=v0.4
+- PROJECT_VERSION=v0.x
 
 Optional tuning:
 - CLAUDE_MODEL=... (e.g. "claude-3-opus-..." or latest Opus)

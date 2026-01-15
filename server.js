@@ -16,12 +16,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, "dist");
 const hasDist = fs.existsSync(distPath);
+const IS_SERVERLESS = Boolean(process.env.NETLIFY || process.env.NETLIFY_LOCAL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const shouldServeDist = hasDist && !IS_SERVERLESS;
 const TOPICS_CONFIG_PATH = path.join(__dirname, "config", "topics.json");
 const SEED_CONCEPTS_CONFIG_PATH = path.join(__dirname, "config", "seedConcepts.json");
-const PROJECT_VERSION = process.env.PROJECT_VERSION || "v0.4";
+const PROJECT_VERSION = process.env.PROJECT_VERSION || "";
 const ADMIN_KEY = process.env.ADMIN_KEY || "";
-const MODEL_PRIMARY = process.env.MODEL_PRIMARY || "gpt-4o-mini";
-const MODEL_SECONDARY = process.env.MODEL_SECONDARY || "gpt-4o-mini";
+const MODEL_PRIMARY = process.env.MODEL_PRIMARY || "";
+const MODEL_SECONDARY = process.env.MODEL_SECONDARY || process.env.MODEL_PRIMARY || "";
 const MAX_MEMORY_CHARS = Number(process.env.MAX_MEMORY_CHARS || 800);
 const MAX_PRIMARY_TOKENS = Number(process.env.MAX_PRIMARY_TOKENS || 400);
 const MAX_SECONDARY_TOKENS = Number(process.env.MAX_SECONDARY_TOKENS || 120);
@@ -775,13 +777,36 @@ const generateTransmission = async ({priorMemory}) => {
   };
 };
 
-const initFirebase = () => {
-  if(!(process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_APPLICATION_CREDENTIALS)) return;
+const loadServiceAccount = () => {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if(!raw) return null;
   try{
-    admin.initializeApp({
-      credential:admin.credential.applicationDefault(),
-      projectId:process.env.FIREBASE_PROJECT_ID
-    });
+    return JSON.parse(raw);
+  }catch(err){
+    // fall through
+  }
+  try{
+    const decoded = Buffer.from(raw, "base64").toString("utf8");
+    return JSON.parse(decoded);
+  }catch(err){
+    return null;
+  }
+};
+
+const initFirebase = () => {
+  if(db) return;
+  if(admin.apps?.length){
+    db = admin.firestore();
+    return;
+  }
+  if(!(process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_SERVICE_ACCOUNT)) return;
+  try{
+    const serviceAccount = loadServiceAccount();
+    const projectId = process.env.FIREBASE_PROJECT_ID || serviceAccount?.project_id;
+    const credential = serviceAccount
+      ? admin.credential.cert(serviceAccount)
+      : admin.credential.applicationDefault();
+    admin.initializeApp({credential, projectId});
     db = admin.firestore();
   }catch(err){
     db = null;
@@ -985,21 +1010,29 @@ const generateCycle = async ({seed, createdBy}) => {
 
 initFirebase();
 
-const ensureCycle = async () => {
+const maybeRotateCycle = async () => {
   const state = await getLatestState();
   if(!state){
-    await generateCycle({seed:null, createdBy:"boot"});
+    return generateCycle({seed:null, createdBy:"boot"});
   }
+  if(isLocked(state)){
+    return generateCycle({seed:null, createdBy:"auto"});
+  }
+  return state;
+};
+
+const ensureCycle = async () => {
+  await maybeRotateCycle();
 };
 
 ensureCycle().catch(() => {});
 
-if(hasDist){
+if(shouldServeDist){
   app.use(express.static(distPath));
 }
 
 app.get("/", (req,res) => {
-  if(hasDist){
+  if(shouldServeDist){
     return res.sendFile(path.join(distPath, "index.html"));
   }
   res.json({status:"KAIRO online"});
@@ -1007,7 +1040,7 @@ app.get("/", (req,res) => {
 
 app.get("/api/last", async (req,res) => {
   try{
-    const state = await getLatestState();
+    const state = await maybeRotateCycle();
     if(!state){
       return res.json({
         cycleId:"boot",
@@ -1171,18 +1204,22 @@ app.get("/api/status", async (req,res) => {
   });
 });
 
-if(hasDist){
+if(shouldServeDist){
   app.get(/.*/, (req,res) => {
     res.sendFile(path.join(distPath, "index.html"));
   });
 }
 
-if(CYCLE_INTERVAL_MINUTES > 0){
+export {app};
+
+if(!IS_SERVERLESS && CYCLE_INTERVAL_MINUTES > 0){
   setInterval(() => {
     generateCycle({seed:null, createdBy:"scheduler"}).catch(() => {});
   }, CYCLE_INTERVAL_MINUTES * 60 * 1000);
 }
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+if(!IS_SERVERLESS){
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
