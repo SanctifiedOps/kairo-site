@@ -371,6 +371,7 @@ export default function App() {
   };
 
   const canVote = Boolean(wallet) && !hasVoted && !cycleLocked;
+  const showCounts = hasVoted;
 
   const playButtonSound = () => {
     const sound = buttonSoundRef.current;
@@ -502,7 +503,7 @@ export default function App() {
                 aria-label={"Stance "+s}
               >
                 <span className="stanceLabel">{s}</span>
-                <span className="stanceCount">{counts?.[s] ?? 0}</span>
+                <span className="stanceCount">{showCounts ? (counts?.[s] ?? 0) : "--"}</span>
               </button>
             ))}
           </div>
