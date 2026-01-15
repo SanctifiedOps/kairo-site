@@ -6,14 +6,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import {randomUUID} from "crypto";
 import fs from "fs";
 import path from "path";
-import {fileURLToPath} from "url";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 8787;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = process.cwd();
 const distPath = path.join(__dirname, "dist");
 const hasDist = fs.existsSync(distPath);
 const IS_SERVERLESS = Boolean(process.env.NETLIFY || process.env.NETLIFY_LOCAL || process.env.AWS_LAMBDA_FUNCTION_NAME);
