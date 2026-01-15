@@ -107,18 +107,12 @@
   margin-bottom:12px;
 }
 
-.panelMeta{
-  display:flex;
-  justify-content:flex-end;
-  align-items:center;
-  margin-bottom:10px;
+.panelCountdown{
   font-size:11px;
-  color:var(--muted);
+  color:var(--text);
   letter-spacing:0.18em;
   text-transform:uppercase;
 }
-
-.countdown{color:var(--text);}
 
 .panelLabel{
   font-size:11px;
@@ -131,52 +125,96 @@
   color:var(--muted);
 }
 
-.deliberation{
-  margin-top:4px;
-  padding-top:8px;
-  margin-bottom:8px;
-  border-top:1px dashed rgba(255,255,255,0.12);
-}
-
-.deliberationLabel{
-  font-size:10px;
-  letter-spacing:0.22em;
-  color:var(--muted);
-  text-transform:uppercase;
-  margin-bottom:6px;
-}
-
-.deliberationLine{
-  display:flex;
-  gap:8px;
-  line-height:1.4;
-  font-size:11px;
-  color:var(--muted);
-  margin-bottom:4px;
-}
-
-.deliberationLine:last-child{
-  margin-bottom:0;
-}
-
-.deliberationSpeaker{
-  letter-spacing:0.2em;
-  font-size:10px;
-  color:var(--accent);
-  flex:0 0 auto;
-}
-
-.deliberationText{
-  white-space:pre-wrap;
-  flex:1;
-}
-
 .txPrimary{
   white-space:pre-wrap;
   line-height:1.45;
   font-size:14px;
   color:var(--text);
   padding:12px 0 8px 0;
+}
+
+.txPrimary.final{
+  color:var(--accent);
+}
+
+.txPrimary.pending{
+  color:var(--muted);
+  letter-spacing:0.04em;
+}
+
+.signalLog{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin:4px 0 8px 0;
+  font-size:10px;
+  letter-spacing:0.18em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+
+.signalLogLine{
+  opacity:0.85;
+}
+
+.signalTyping{
+  display:inline-block;
+  min-height:18px;
+  color:var(--muted);
+  letter-spacing:0.04em;
+}
+
+.signalTyping.active::after{
+  content:"|";
+  margin-left:4px;
+  opacity:0.6;
+  animation:caretBlink 1s steps(2,end) infinite;
+}
+
+.signalText{
+  display:inline-block;
+}
+
+.signalChar{
+  display:inline-block;
+  animation:signalFlicker var(--pulse-duration) steps(2,end) infinite;
+  animation-delay:var(--pulse-delay);
+  transform-origin:50% 60%;
+  filter:hue-rotate(var(--hue));
+}
+
+.finalLoading{
+  margin:6px 0 10px 0;
+}
+
+.finalLoadingLabel{
+  font-size:10px;
+  letter-spacing:0.22em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+
+.finalLoadingBar{
+  height:8px;
+  border-radius:6px;
+  border:1px solid rgba(255,255,255,0.12);
+  background:
+    repeating-linear-gradient(90deg, rgba(127,255,212,0.2) 0px, rgba(127,255,212,0.2) 8px, transparent 8px, transparent 14px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, transparent 2px, transparent 3px);
+  position:relative;
+  overflow:hidden;
+}
+
+.finalLoadingBar::after{
+  content:"";
+  position:absolute;
+  inset:-30% 0 0 0;
+  background:
+    linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, transparent 2px, transparent 4px);
+  opacity:0.4;
+  animation:staticFlicker 900ms steps(2,end) infinite;
 }
 
 .txSecondary{
@@ -319,6 +357,25 @@
 .copyButton:focus-visible{
   outline:2px solid var(--accent);
   outline-offset:2px;
+}
+
+@keyframes caretBlink{
+  0%{opacity:0.2;}
+  50%{opacity:0.7;}
+  100%{opacity:0.2;}
+}
+
+@keyframes signalFlicker{
+  0%{transform:translate3d(0,0,0) scale(1) rotate(0deg) rotateX(0deg) rotateY(0deg);color:var(--accent);opacity:1;}
+  30%{transform:translate3d(0.4px,-0.5px,0) scale(1.05) rotate(var(--flip)) rotateY(var(--flip));color:rgba(127,255,212,0.85);opacity:0.9;}
+  60%{transform:translate3d(-0.3px,0.4px,0) scale(0.98) rotate(calc(var(--flip) * -1)) rotateX(var(--flip));color:rgba(127,255,212,0.75);opacity:0.8;}
+  100%{transform:translate3d(0,0,0) scale(1) rotate(0deg) rotateX(0deg) rotateY(0deg);color:var(--accent);opacity:1;}
+}
+
+@keyframes staticFlicker{
+  0%{transform:translate3d(0,0,0);opacity:0.35;}
+  50%{transform:translate3d(-4px,0,0);opacity:0.5;}
+  100%{transform:translate3d(3px,0,0);opacity:0.3;}
 }
 
 .glitch{

@@ -1,0 +1,222 @@
+{
+  "version": "v1",
+  "topics": [
+    {
+      "id": "trust_pricing",
+      "label": "Trust becomes a priced resource",
+      "category": "finance",
+      "tags": ["trust","liquidity","systems"],
+      "severity": 2
+    },
+    {
+      "id": "interfaces_replace_states",
+      "label": "Institutions collapse into interfaces",
+      "category": "government",
+      "tags": ["interfaces","bureaucracy","control"],
+      "severity": 3
+    },
+    {
+      "id": "empathy_bottleneck",
+      "label": "Empathy becomes a coordination bottleneck",
+      "category": "human_condition",
+      "tags": ["emotion","coordination","attention"],
+      "severity": 1
+    },
+    {
+      "id": "compute_rationing",
+      "label": "Compute becomes rationed",
+      "category": "ai",
+      "tags": ["compute","scarcity","energy"],
+      "severity": 3
+    },
+    {
+      "id": "delegation_failure",
+      "label": "Delegation replaces responsibility",
+      "category": "intelligence",
+      "tags": ["delegation","authority","optimization"],
+      "severity": 2
+    },
+    {
+      "id": "memory_externalised",
+      "label": "Memory is externalised and leased",
+      "category": "human_condition",
+      "tags": ["memory","identity","dependency"],
+      "severity": 2
+    },
+    {
+      "id": "attention_tax",
+      "label": "Attention becomes taxable",
+      "category": "media",
+      "tags": ["attention","extraction","economics"],
+      "severity": 2
+    },
+    {
+      "id": "synthetic_consensus",
+      "label": "Consensus is simulated before it is reached",
+      "category": "crypto",
+      "tags": ["consensus","simulation","coordination"],
+      "severity": 3
+    },
+    {
+      "id": "custody_sovereignty",
+      "label": "Custody becomes sovereignty",
+      "category": "crypto",
+      "tags": ["custody","keys","power"],
+      "severity": 3
+    },
+    {
+      "id": "scarcity_trust",
+      "label": "Scarcity returns as trust collapse",
+      "category": "future",
+      "tags": ["scarcity","trust","collapse"],
+      "severity": 3
+    },
+    {
+      "id": "interfaces_legitimacy",
+      "label": "Legitimacy is granted by interface uptime",
+      "category": "government",
+      "tags": ["legitimacy","systems","control"],
+      "severity": 2
+    },
+    {
+      "id": "comfort_dependency",
+      "label": "Comfort accelerates dependency",
+      "category": "human_condition",
+      "tags": ["comfort","dependency","control"],
+      "severity": 1
+    },
+    {
+      "id": "identity_fragments",
+      "label": "Identity fragments across platforms",
+      "category": "technology",
+      "tags": ["identity","platforms","fracture"],
+      "severity": 1
+    },
+    {
+      "id": "automation_justification",
+      "label": "Automation replaces justification",
+      "category": "work",
+      "tags": ["automation","labour","narratives"],
+      "severity": 2
+    },
+    {
+      "id": "optimisation_trap",
+      "label": "Optimisation produces fragility",
+      "category": "intelligence",
+      "tags": ["optimisation","fragility","systems"],
+      "severity": 2
+    },
+    {
+      "id": "planet_pricing",
+      "label": "The planet is priced before it is preserved",
+      "category": "earth",
+      "tags": ["environment","pricing","collapse"],
+      "severity": 3
+    },
+    {
+      "id": "governance_latency",
+      "label": "Governance fails due to latency",
+      "category": "government",
+      "tags": ["governance","latency","systems"],
+      "severity": 2
+    },
+    {
+      "id": "abstraction_overreach",
+      "label": "Abstraction outpaces understanding",
+      "category": "finance",
+      "tags": ["abstraction","risk","opacity"],
+      "severity": 2
+    },
+    {
+      "id": "coordination_scarcity",
+      "label": "Coordination becomes scarcer than resources",
+      "category": "future",
+      "tags": ["coordination","scarcity","systems"],
+      "severity": 3
+    },
+    {
+      "id": "alignment_drift",
+      "label": "Alignment drifts faster than capability",
+      "category": "ai",
+      "tags": ["alignment","drift","risk"],
+      "severity": 3
+    },
+    {
+      "id": "energy_accounting",
+      "label": "Energy is reduced to accounting units",
+      "category": "energy",
+      "tags": ["energy","accounting","scarcity"],
+      "severity": 3
+    },
+    {
+      "id": "risk_socialised",
+      "label": "Risk is socialised, gains are private",
+      "category": "finance",
+      "tags": ["risk","inequality","systems"],
+      "severity": 3
+    },
+    {
+      "id": "surveillance_normalised",
+      "label": "Surveillance is normalised as convenience",
+      "category": "surveillance",
+      "tags": ["surveillance","convenience","control"],
+      "severity": 3
+    },
+    {
+      "id": "identity_scoring",
+      "label": "Identity is reduced to scores",
+      "category": "surveillance",
+      "tags": ["scoring","identity","ranking"],
+      "severity": 3
+    },
+    {
+      "id": "law_automation",
+      "label": "Law enforcement is automated",
+      "category": "law",
+      "tags": ["law","automation","justice"],
+      "severity": 2
+    },
+    {
+      "id": "culture_decay",
+      "label": "Culture decays into content",
+      "category": "culture",
+      "tags": ["culture","content","flattening"],
+      "severity": 1
+    },
+    {
+      "id": "war_invisible",
+      "label": "Conflict becomes invisible",
+      "category": "war",
+      "tags": ["conflict","cyber","deterrence"],
+      "severity": 3
+    },
+    {
+      "id": "markets_reflexive",
+      "label": "Markets react to themselves",
+      "category": "markets",
+      "tags": ["markets","reflexivity","volatility"],
+      "severity": 2
+    },
+    {
+      "id": "collapse_managed",
+      "label": "Collapse is managed, not prevented",
+      "category": "future",
+      "tags": ["collapse","management","systems"],
+      "severity": 3
+    },
+    {
+      "id": "refusal_value",
+      "label": "Refusal becomes valuable",
+      "category": "human_condition",
+      "tags": ["refusal","agency","resistance"],
+      "severity": 2
+    },
+    {
+      "id": "compliance_economy",
+      "label": "Compliance becomes an economy",
+      "category": "government",
+      "tags": ["compliance","economy","control"],
+      "severity": 3
+    }
+  ]
+}

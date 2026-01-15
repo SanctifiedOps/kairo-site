@@ -1,4 +1,4 @@
-﻿import {useEffect,useRef,useState} from "react";
+﻿import {useEffect,useMemo,useRef,useState} from "react";
 import "./App.css";
 
 const STANCES = ["ALIGN","REJECT","WITHHOLD"];
@@ -27,6 +27,14 @@ const getProvider = () => {
   return null;
 };
 
+const LOADING_LINES = [
+  "Transmission initialized...",
+  "Decoding KAIRO...",
+  "Translating message...",
+  "Transmission identified."
+];
+const GLITCH_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#@$%&*<>/+=";
+
 export default function App() {
   const [transmission,setTransmission] = useState(null);
   const [stance,setStance] = useState(null);
@@ -40,8 +48,12 @@ export default function App() {
   const [audioOn,setAudioOn] = useState(false);
   const [wallet,setWallet] = useState(null);
   const [walletProvider,setWalletProvider] = useState(null);
+  const [loadingLines,setLoadingLines] = useState([]);
+  const [typedTransmission,setTypedTransmission] = useState("");
+  const [showConsensus,setShowConsensus] = useState(true);
   const audioRef = useRef(null);
   const buttonSoundRef = useRef(null);
+  const timersRef = useRef([]);
   const lastGlitchRef = useRef(0);
   const lastAtRef = useRef(null);
   const audioAllowKey = "kairoAudioAllowed";
@@ -83,6 +95,76 @@ export default function App() {
     const t = window.setInterval(() => {setUtc(nowUtc());},1000);
     return () => {window.clearInterval(t);};
   },[]);
+
+  const consensusText = transmission?.consensus || transmission?.primary || "NO TRANSMISSION AVAILABLE";
+  const finalChars = useMemo(() => {
+    return (consensusText || "").split("").map((char) => ({
+      char,
+      delay:`${(Math.random() * 1.8).toFixed(2)}s`,
+      duration:`${(1.2 + Math.random() * 2.4).toFixed(2)}s`,
+      flip:`${(Math.random() * 6 - 3).toFixed(1)}deg`,
+      hue:`${(Math.random() * 12 - 6).toFixed(1)}deg`
+    }));
+  },[consensusText]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const clearTimers = () => {
+      timersRef.current.forEach((id) => {
+        window.clearTimeout(id);
+        window.clearInterval(id);
+      });
+      timersRef.current = [];
+    };
+    const delay = (ms) => new Promise((resolve) => {
+      const id = window.setTimeout(resolve, ms);
+      timersRef.current.push(id);
+    });
+    const typeTransmission = async (text) => {
+      const chars = [];
+      for(let i = 0; i < text.length; i += 1){
+        if(cancelled) return;
+        const current = text[i];
+        if(current === "\n"){
+          chars.push("\n");
+          setTypedTransmission(chars.join(""));
+          await delay(60);
+          continue;
+        }
+        const wrong = GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
+        chars.push(wrong);
+        setTypedTransmission(chars.join(""));
+        await delay(20 + Math.floor(Math.random() * 40));
+        chars[chars.length - 1] = current;
+        setTypedTransmission(chars.join(""));
+        await delay(20 + Math.floor(Math.random() * 50));
+      }
+    };
+
+    clearTimers();
+    setLoadingLines([]);
+    setTypedTransmission("");
+    setShowConsensus(false);
+    if(!transmission?.at || !consensusText) return () => {clearTimers();};
+
+    const run = async () => {
+      for(const line of LOADING_LINES){
+        setLoadingLines((prev) => [...prev, line]);
+        await delay(420 + Math.floor(Math.random() * 360));
+        if(cancelled) return;
+      }
+      await delay(240);
+      await typeTransmission(consensusText);
+      if(cancelled) return;
+      setShowConsensus(true);
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+      clearTimers();
+    };
+  },[transmission?.at, consensusText]);
 
   useEffect(() => {
     if(!transmission?.at) return;
@@ -320,9 +402,6 @@ export default function App() {
     setStatus("CA COPY FAILED");
   };
 
-  const deliberation = Array.isArray(transmission?.deliberation) ? transmission.deliberation : [];
-  const consensusText = transmission?.consensus || transmission?.primary || "NO TRANSMISSION AVAILABLE";
-
   return (
     <div className="kairo">
       <video
@@ -359,31 +438,53 @@ export default function App() {
           </button>
         </div>
       </header>
-
       <main className="shell">
-        <section className={"panel "+(glitch ? "glitch" : "")}>
+        <section className={"panel "+(glitch ? "glitch" : "")}> 
           <div className="panelTop">
-            <div className="panelLabel">TRANSMISSION</div>
-            <div className="integrity">CYCLE {transmission?.cycleIndex || 0}</div>
-          </div>
-          <div className="panelMeta">
-            <div className="countdown">{countdown}</div>
+            <div className="panelLabel">TRANSMISSION - CYCLE {transmission?.cycleIndex || 0}</div>
+            <div className="panelCountdown">{countdown}</div>
           </div>
 
-          {deliberation.length ? (
-            <div className="deliberation">
-              <div className="deliberationLabel">DELIBERATION</div>
-              {deliberation.map((entry, idx) => (
-                <div key={`${entry?.speaker || "AGENT"}-${idx}`} className="deliberationLine">
-                  <span className="deliberationSpeaker">{entry?.speaker || "AGENT"}</span>
-                  <span className="deliberationText">{entry?.text || ""}</span>
-                </div>
+          {loadingLines.length ? (
+            <div className="signalLog">
+              {loadingLines.map((line, idx) => (
+                <div key={`${line}-${idx}`} className="signalLogLine">{line}</div>
               ))}
             </div>
           ) : null}
 
-          <div className="txPrimary">
-            {consensusText}
+          {!showConsensus ? (
+            <div className="finalLoading">
+              <div className="finalLoadingLabel">DECIPHERING FINAL TRANSMISSION</div>
+              <div className="finalLoadingBar" aria-hidden="true"/>
+            </div>
+          ) : null}
+
+          <div className={`txPrimary ${showConsensus ? "final" : "pending"}`}>
+            {showConsensus ? (
+              <span className="signalText">
+                {finalChars.map((item, idx) => (
+                  item.char === "\n"
+                    ? <br key={`br-${idx}`}/>
+                    : (
+                      <span
+                        key={`ch-${idx}`}
+                        className="signalChar"
+                        style={{
+                          "--pulse-delay": item.delay,
+                          "--pulse-duration": item.duration,
+                          "--flip": item.flip,
+                          "--hue": item.hue
+                        }}
+                      >
+                        {item.char}
+                      </span>
+                    )
+                ))}
+              </span>
+            ) : (
+              <span className={`signalTyping ${typedTransmission ? "active" : ""}`}>{typedTransmission}</span>
+            )}
           </div>
 
           {transmission?.secondary ? (
@@ -409,6 +510,7 @@ export default function App() {
           <div className="statusLine">{statusLine}</div>
         </section>
       </main>
+
 
       <footer className="footer">
         <div className="footLeft">

@@ -1,0 +1,324 @@
+KAIRO — LLM-TO-LLM DELIBERATION ENGINE SPEC (FOR CODEX)
+Version: v0.4 (Claude OPUS + OpenAI AUDITOR)
+Stack: Firebase Functions (Node) + Firestore + Anthropic (Claude) + OpenAI
+Cadence: every 5 minutes
+Output: one final “Transmission” per cycle + optional 1-line “trace”
+Voting: wallet-required, one vote per wallet per cycle, live counts after vote
+Rewards: end-of-cycle selects a winning bucket and random winners (ledger only; on-chain later)
+
+=====================================================================
+0) GOAL (ONE SENTENCE)
+=====================================================================
+Build a deterministic, cost-bounded deliberation protocol where CLAUDE (OPUS) drafts and revises transmissions, OPENAI (AUDITOR) critiques and approves them, novelty is enforced via topic rotation + repetition gates, and the final transmission is published every 5 minutes for users to vote on.
+
+=====================================================================
+1) CORE DESIGN PRINCIPLES
+=====================================================================
+1) Fixed protocol per cycle. No freeform endless chat.
+2) Scarcity and mystique come from cadence + restraint, not length.
+3) Novelty is enforced by backend gates (not “try to be original” prompts).
+4) Output must include a fork mapping to ALIGN/REJECT/WITHHOLD.
+5) Server time is authority. Client countdown is display only.
+6) No API keys in browser. All model calls are server-side.
+7) Cost bounded by strict caps and limited turns (max 4 calls/cycle).
+
+=====================================================================
+2) ROLES + PROVIDERS (UPDATED)
+=====================================================================
+Role A: OPUS (Oracle / future intelligence)
+- Provider: Anthropic Claude API
+- Model: Claude Opus class (choose current Opus model name from your account)
+- Purpose: draft + revise the transmission.
+
+Role B: AUDITOR (Verifier / constraint enforcer)
+- Provider: OpenAI API
+- Model: choose a cost-efficient model for critique/approve
+- Purpose: enforce constraints, reduce repetition, approve or request one re-roll.
+
+Fallback behavior:
+- If Claude call fails, do NOT block the cycle indefinitely.
+  - Option A: reuse previous cycle statement with integrity=LOW and trace="OPUS OFFLINE"
+  - Option B: fall back to OpenAI for OPUS for that single cycle
+Pick one and implement as a clear branch (recommended: Option B).
+
+=====================================================================
+3) REQUIRED PACKAGES (NODE)
+=====================================================================
+Backend dependencies:
+- firebase-admin
+- firebase-functions (or firebase-functions/v2)
+- @anthropic-ai/sdk
+- openai
+- dotenv (local dev)
+
+If Codex is creating a Functions project, install in functions/:
+npm i @anthropic-ai/sdk openai dotenv
+
+=====================================================================
+4) ENVIRONMENT VARIABLES (BACKEND ONLY)
+=====================================================================
+Required:
+- ANTHROPIC_API_KEY=...
+- OPENAI_API_KEY=...
+- ADMIN_KEY=...
+- PROJECT_VERSION=v0.4
+
+Optional tuning:
+- CLAUDE_MODEL=... (e.g. "claude-3-opus-..." or latest Opus)
+- OPENAI_AUDITOR_MODEL=...
+- MAX_PRIMARY_TOKENS=420
+- MAX_AUDITOR_TOKENS=260
+- MAX_REVISION_TOKENS=320
+- MAX_TRACE_TOKENS=80
+- MAX_MEMORY_CHARS=900
+- CYCLE_INTERVAL_MINUTES=5
+- WINNERS_PER_CYCLE=5
+- REPEAT_THRESHOLD=0.22
+
+Never expose secrets to the client.
+
+=====================================================================
+5) DELIBERATION PROTOCOL (MAX 4 CALLS PER CYCLE)
+=====================================================================
+Each 5-minute cycle runs exactly this sequence:
+
+Step 0) Topic selection (no LLM)
+- Select 1–3 topics at random using a “shuffle bag” to reduce repetition.
+- Select 1 seed concept from a separate shuffle bag.
+- Build a “seed pack”:
+  - topics[]
+  - seedConcept
+  - lastSummary
+  - doctrine
+
+Step 1) OPUS_DRAFT (Claude call #1)
+- Claude OPUS writes a draft transmission (6–10 lines max).
+- Must include:
+  - thesis line
+  - consequence line
+  - fork lines mapping to ALIGN/REJECT/WITHHOLD
+- Must avoid:
+  - dates, precise predictions, hype, empathy, explanation, marketing.
+
+Step 2) AUDIT_CRITIQUE (OpenAI call #2)
+- OpenAI AUDITOR critiques OPUS draft and enforces:
+  - non-repetition (based on lastSummary + recent phrases)
+  - falsifiability avoidance
+  - no contradictions vs doctrine
+  - clarity and coherence of the fork
+- Outputs:
+  - issues[] (short)
+  - requiredChanges[] (short)
+  - flags: repeatRisk, contradictionRisk
+  - integrity: LOW|MED|HIGH
+
+Step 3) OPUS_REVISION (Claude call #3)
+- Claude OPUS revises using requiredChanges and avoidPhrases.
+- Output must be FINAL transmission (3–10 lines).
+- Must include fork mapping.
+
+Step 4) AUDITOR_APPROVE (OpenAI call #4, recommended)
+- OpenAI AUDITOR either:
+  - approve:true with final integrity + optional trace
+  - approve:false if too repetitive; request one re-roll
+- If approve:false:
+  - backend runs Step 3 once more (max one retry) with stronger “avoid motif” constraint.
+- No infinite loops.
+
+Result per cycle:
+- transmission (string)
+- integrity (LOW|MED|HIGH)
+- trace (optional, one line)
+- repeatRisk boolean
+
+=====================================================================
+6) CLAUDE IMPLEMENTATION DETAILS (HOW TO CALL)
+=====================================================================
+Use @anthropic-ai/sdk. Example pattern (Node):
+
+import Anthropic from "@anthropic-ai/sdk";
+
+const anthropic = new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY});
+
+const callClaude = async ({systemPrompt,userPrompt,maxTokens}) => {
+  const r = await anthropic.messages.create({
+    model:process.env.CLAUDE_MODEL,
+    max_tokens:maxTokens,
+    system:systemPrompt,
+    messages:[{role:"user",content:userPrompt}]
+  });
+  // r.content is array; extract text blocks
+  const text = (r.content || [])
+    .filter((b)=>b.type==="text")
+    .map((b)=>b.text)
+    .join("\n")
+    .trim();
+  return text;
+};
+
+Key constraints:
+- Keep max_tokens tight.
+- Do not stream in Functions (optional).
+- Always trim and enforce line limits post-generation (server-side).
+
+=====================================================================
+7) OPENAI IMPLEMENTATION DETAILS (AUDITOR)
+=====================================================================
+Use the official OpenAI Node SDK.
+
+import OpenAI from "openai";
+const openai = new OpenAI({apiKey:process.env.OPENAI_API_KEY});
+
+const callOpenAI = async ({model,systemPrompt,userPrompt,maxTokens}) => {
+  const r = await openai.chat.completions.create({
+    model,
+    messages:[
+      {role:"system",content:systemPrompt},
+      {role:"user",content:userPrompt}
+    ],
+    max_tokens:maxTokens
+  });
+  return (r.choices?.[0]?.message?.content || "").trim();
+};
+
+Auditor output format:
+- Prefer JSON for machine parsing:
+{
+  "issues":["..."],
+  "requiredChanges":["..."],
+  "flags":{"repeatRisk":true,"contradictionRisk":false},
+  "integrity":"MED"
+}
+
+If JSON parsing fails, fall back to simple extraction and set integrity=LOW.
+
+=====================================================================
+8) TOPIC SYSTEM (COMPREHENSIVE + RANDOM + NON-REPEATING)
+=====================================================================
+8.1 Topic list (build as array with category tags)
+Include at minimum:
+- human_condition, earth, future, finance, crypto, emotions, ai, intelligence,
+  government, family, work, technology, advancements, media, war, culture,
+  religion, cities, health, education, markets, surveillance, ecology, energy, law
+
+8.2 Shuffle-bag selection (persist bag state)
+- Store bag state in Firestore (config/bags):
+  - topicsBagRemaining:[...]
+  - seedBagRemaining:[...]
+  - lastTopic:string|null
+- Each cycle:
+  - pop next topic (avoid lastTopic)
+  - optionally pick 2–3 topics from different categories
+
+8.3 Seed concepts list
+Maintain 50–150 seed concepts. Shuffle-bag the list.
+Avoid reusing same seed concept within last 25 cycles.
+
+=====================================================================
+9) NOVELTY / REPETITION CONTROL (BACKEND GATES)
+=====================================================================
+9.1 Memory window
+- Store last 10 full transmissions in cycles collection for archive
+- Store last 50 summaries (<= 140 chars) in memory/recent
+
+9.2 Similarity heuristic (cheap overlap)
+- normalize + extract bigrams/keywords
+- overlap with last 10 transmissions
+- if > REPEAT_THRESHOLD -> repeatRisk=true
+
+9.3 Re-roll policy
+If auditor requests reroll OR repeatRisk too high:
+- run OPUS_REVISION once more with:
+  - stronger avoid phrase list
+  - “choose different angle within same topic”
+If still high:
+- accept but integrity=LOW and trace indicates degradation.
+
+=====================================================================
+10) DOCTRINE (CONSISTENCY WITHOUT CONTRADICTIONS)
+=====================================================================
+Doctrine (v1, injected every cycle):
+- Systems follow incentives.
+- Institutions collapse into interfaces.
+- Trust is scarce and becomes priced.
+- Intelligence increases coordination pressure.
+- Convenience trades control for dependency.
+- Scarcity returns first as trust collapse, then as energy/compute rationing.
+- Most “solutions” are accounting changes before they become real changes.
+
+Outputs must not contradict doctrine.
+Optimism allowed only as coordination/resilience/refusal.
+
+=====================================================================
+11) OUTPUT FORMAT (TRANSMISSION MUST MAP TO VOTE)
+=====================================================================
+Final transmission: 3–10 lines.
+Must include fork mapping to votes, e.g.:
+ALIGN: ...
+REJECT: ...
+WITHHOLD: ...
+
+Must not mention:
+- rewards
+- token
+- marketing
+- “vote to win”
+
+=====================================================================
+12) FIRESTORE SCHEMA (UNCHANGED FROM v0.3, PROVIDER META UPDATED)
+=====================================================================
+state/current:
+{
+  cycleId, cycleNumber, startedAt, endsAt,
+  topics:[string], seedConcept:string, doctrineVersion:"v1",
+  transmission:string, trace:string|null, integrity:"LOW"|"MED"|"HIGH",
+  voteCounts:{ALIGN:number,REJECT:number,WITHHOLD:number},
+  locked:boolean,
+  winningBucket:"ALIGN"|"REJECT"|"WITHHOLD"|null,
+  winnersSelected:boolean,
+  repeatRisk:boolean,
+  createdAt:string,
+  modelMeta:{opus:"claude",auditor:"openai"}
+}
+
+cycles/{cycleId}:
+Same fields plus auditIssues[], auditFlags, modelMeta with model names.
+
+votes/{cycleId}_{wallet}:
+{cycleId,cycleNumber,wallet,stance,at,message,signature}
+
+rewards/{cycleId}:
+{cycleId,cycleNumber,endsAt,winningBucket,eligibleVoterCount,selectedWinnerCount,winners:[{wallet,amount:null}],selectionMethod,creatorRewardsTotal:null,creatorRewardsPortion:null,at}
+
+memory/recent:
+{lastSummaries:[string],lastTopics:[string],lastPhrases:[string]}
+
+=====================================================================
+13) API CONTRACT (UNCHANGED)
+=====================================================================
+GET /api/current
+GET /api/vote?cycleId=...&wallet=...
+POST /api/vote
+GET /api/rewards?cycleId=...
+
+Admin:
+POST /api/admin/forceCycle (x-admin-key)
+POST /api/admin/finalize (x-admin-key)
+
+=====================================================================
+14) IMPLEMENTATION CHECKLIST (CODEX TASKS)
+=====================================================================
+1) Firebase Functions init (Node) + Firestore admin.
+2) Install @anthropic-ai/sdk and openai.
+3) Implement bag persistence in Firestore (config/bags).
+4) Implement scheduled cycle engine:
+   - compute 5-min window
+   - finalize previous cycle
+   - create new cycle with Claude OPUS + OpenAI AUDITOR protocol
+5) Implement novelty gates + one reroll max.
+6) Implement voting endpoints + Solana signature verification.
+7) Implement weighted bucket + winner selection + rewards ledger write.
+8) Ensure API responses match frontend needs.
+
+END OF SPEC
+=====================================================================
