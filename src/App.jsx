@@ -1,4 +1,4 @@
-﻿import {useEffect,useMemo,useRef,useState} from "react";
+﻿import {useEffect,useRef,useState} from "react";
 import "./App.css";
 
 const STANCES = ["ALIGN","REJECT","WITHHOLD"];
@@ -8,24 +8,47 @@ const nowUtc = () => {
   return d.toISOString().replace("T"," ").replace("Z"," UTC");
 };
 
+const formatCountdown = (ms) => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const minutes = String(Math.floor(total / 60)).padStart(2,"0");
+  const seconds = String(total % 60).padStart(2,"0");
+  return `${minutes}:${seconds}`;
+};
+
+const formatWallet = (addr) => {
+  if(!addr) return "CONNECT WALLET";
+  return `${addr.slice(0,4)}...${addr.slice(-4)}`;
+};
+
+const getProvider = () => {
+  if(window.solana?.isPhantom) return window.solana;
+  if(window.solflare?.isSolflare) return window.solflare;
+  if(window.solana?.isSolflare) return window.solana;
+  return null;
+};
+
 export default function App() {
   const [transmission,setTransmission] = useState(null);
   const [stance,setStance] = useState(null);
-  const [locked,setLocked] = useState(false);
+  const [cycleLocked,setCycleLocked] = useState(false);
+  const [hasVoted,setHasVoted] = useState(false);
+  const [counts,setCounts] = useState({ALIGN:0,REJECT:0,WITHHOLD:0});
+  const [countdown,setCountdown] = useState("05:00");
   const [status,setStatus] = useState("ROUTE: DEGRADED");
   const [glitch,setGlitch] = useState(false);
   const [utc,setUtc] = useState(nowUtc());
+  const [audioOn,setAudioOn] = useState(false);
+  const [wallet,setWallet] = useState(null);
+  const [walletProvider,setWalletProvider] = useState(null);
+  const audioRef = useRef(null);
+  const buttonSoundRef = useRef(null);
   const lastGlitchRef = useRef(0);
   const lastAtRef = useRef(null);
+  const audioAllowKey = "kairoAudioAllowed";
+  const voteKey = "kairoVoteCycle";
 
   const tagline = "EVERYTHING YOU SEE IS RESIDUAL";
-  const sigil = "\u2020>z\u0160\u00FA_";
-
-  const integrity = useMemo(() => {
-    if(!transmission?.integrity) return "LOW";
-    return transmission.integrity;
-  },[transmission]);
-
+  const caValue = "CA: PENDING";
   const triggerGlitch = () => {
     const now = Date.now();
     if(now - lastGlitchRef.current < 1500) return;
@@ -39,12 +62,14 @@ export default function App() {
       const r = await fetch("/api/last");
       if(!r.ok) throw new Error("bad_status");
       const j = await r.json();
-      if(j?.primary){
+      if(j){
         setTransmission(j);
+        setCounts(j?.stanceCounts || {ALIGN:0,REJECT:0,WITHHOLD:0});
+        setCycleLocked(Boolean(j?.locked));
       }
     }catch(err){
       // keep silent; status can degrade
-      setStatus("ROUTE: OFFLINE");
+      setStatus("ROUTE: DEGRADED");
     }
   };
 
@@ -63,10 +88,29 @@ export default function App() {
     if(!transmission?.at) return;
     if(transmission.at === lastAtRef.current) return;
     lastAtRef.current = transmission.at;
-    setLocked(false);
+    if(transmission?.cycleId){
+      const stored = window.localStorage.getItem(voteKey);
+      setHasVoted(stored === transmission.cycleId);
+    }else{
+      setHasVoted(false);
+    }
     setStance(null);
     setStatus("ROUTE: DEGRADED");
   },[transmission]);
+
+  useEffect(() => {
+    if(!transmission?.cycleEndsAt){
+      setCountdown("05:00");
+      return;
+    }
+    const tick = () => {
+      const ms = Date.parse(transmission.cycleEndsAt) - Date.now();
+      setCountdown(formatCountdown(ms));
+    };
+    tick();
+    const t = window.setInterval(() => {tick();},1000);
+    return () => {window.clearInterval(t);};
+  },[transmission?.cycleEndsAt]);
 
   useEffect(() => {
     // occasional ambient glitch
@@ -77,10 +121,88 @@ export default function App() {
     return () => {window.clearInterval(t);};
   },[]);
 
+  useEffect(() => {
+    const provider = getProvider();
+    if(!provider) return;
+    setWalletProvider(provider);
+    if(provider.isConnected && provider.publicKey){
+      setWallet(provider.publicKey.toString());
+    }
+    const onConnect = (pub) => {
+      const key = pub?.toString?.() || provider.publicKey?.toString?.();
+      if(key) setWallet(key);
+    };
+    const onDisconnect = () => {setWallet(null);};
+    if(provider.on){
+      provider.on("connect", onConnect);
+      provider.on("disconnect", onDisconnect);
+    }
+    return () => {
+      if(provider.off){
+        provider.off("connect", onConnect);
+        provider.off("disconnect", onDisconnect);
+      }
+    };
+  },[]);
+
+  useEffect(() => {
+    const sound = buttonSoundRef.current;
+    if(!sound) return;
+    sound.volume = 0.15;
+  },[]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if(!audio) return;
+    audio.volume = 0.08;
+    const syncState = () => {
+      setAudioOn(!audio.paused && !audio.muted);
+    };
+    const tryPlay = (forceUnmute) => {
+      const allowed = window.localStorage.getItem(audioAllowKey) === "1";
+      audio.muted = !(allowed || forceUnmute);
+      audio.play().then(() => {
+        if(!audio.muted) window.localStorage.setItem(audioAllowKey, "1");
+        syncState();
+      }).catch(() => {setAudioOn(false);});
+    };
+    const onGesture = () => {
+      window.localStorage.setItem(audioAllowKey, "1");
+      tryPlay(true);
+    };
+    const onCanPlay = () => {tryPlay(false);};
+    audio.addEventListener("play", syncState);
+    audio.addEventListener("pause", syncState);
+    audio.addEventListener("volumechange", syncState);
+    audio.addEventListener("canplay", onCanPlay);
+    document.addEventListener("pointerdown", onGesture, {once:true});
+    document.addEventListener("keydown", onGesture, {once:true});
+    tryPlay(false);
+    return () => {
+      audio.removeEventListener("play", syncState);
+      audio.removeEventListener("pause", syncState);
+      audio.removeEventListener("volumechange", syncState);
+      audio.removeEventListener("canplay", onCanPlay);
+      document.removeEventListener("pointerdown", onGesture);
+      document.removeEventListener("keydown", onGesture);
+    };
+  },[]);
+
   const submitStance = async (next) => {
-    if(locked) return;
+    if(cycleLocked){
+      setStatus("CYCLE CLOSED");
+      return;
+    }
+    if(hasVoted){
+      setStatus("INPUT LOCKED");
+      return;
+    }
+    if(!wallet){
+      setStatus("WALLET REQUIRED");
+      return;
+    }
     setStance(next);
-    setLocked(true);
+    setHasVoted(true);
     setStatus("OBSERVATION RECORDED");
     triggerGlitch();
 
@@ -88,9 +210,30 @@ export default function App() {
       const r = await fetch("/api/stance",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({stance:next,at:new Date().toISOString()})
+        body:JSON.stringify({stance:next,actorId:wallet,at:new Date().toISOString()})
       });
-      if(!r.ok) throw new Error("bad_status");
+      const j = await r.json();
+      if(!r.ok){
+        if(j?.error === "ALREADY_VOTED"){
+          setStatus("INPUT LOCKED");
+          if(j?.stanceCounts) setCounts(j.stanceCounts);
+          if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
+          return;
+        }
+        if(j?.error === "LOCKED"){
+          setStatus("CYCLE CLOSED");
+          setCycleLocked(true);
+          return;
+        }
+        if(j?.error === "WALLET_REQUIRED"){
+          setStatus("WALLET REQUIRED");
+          setHasVoted(false);
+          return;
+        }
+        throw new Error("bad_status");
+      }
+      if(j?.stanceCounts) setCounts(j.stanceCounts);
+      if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
       setStatus("RECORDED");
     }catch(err){
       // still keep the recorded feel, but degrade status subtly
@@ -98,11 +241,87 @@ export default function App() {
     }
   };
 
-  const footerNote = status.includes("OFFLINE")
-    ? "CONGESTION INCREASED"
-    : locked
-      ? "OBSERVATION RECORDED"
-      : "NO RESPONSE REQUIRED";
+  const toggleAudio = async () => {
+    const audio = audioRef.current;
+    if(!audio) return;
+    if(audio.paused || audio.muted){
+      try{
+        audio.muted = false;
+        await audio.play();
+        window.localStorage.setItem(audioAllowKey, "1");
+      }catch(err){
+        setAudioOn(false);
+      }
+      return;
+    }
+    audio.pause();
+  };
+
+  const connectWallet = async () => {
+    const provider = walletProvider || getProvider();
+    if(!provider){
+      setStatus("WALLET NOT FOUND");
+      return;
+    }
+    try{
+      const res = await provider.connect();
+      const key = res?.publicKey?.toString?.() || provider.publicKey?.toString?.();
+      if(key){
+        setWallet(key);
+        setStatus("WALLET CONNECTED");
+      }
+    }catch(err){
+      setStatus("WALLET DENIED");
+    }
+  };
+
+  const disconnectWallet = async () => {
+    const provider = walletProvider || getProvider();
+    if(provider?.disconnect){
+      try{
+        await provider.disconnect();
+      }catch(err){
+        // ignore
+      }
+    }
+    setWallet(null);
+    setStatus("WALLET DISCONNECTED");
+  };
+
+  const canVote = Boolean(wallet) && !hasVoted && !cycleLocked;
+
+  const playButtonSound = () => {
+    const sound = buttonSoundRef.current;
+    if(!sound) return;
+    sound.currentTime = 0;
+    sound.play().catch(() => {});
+  };
+
+  const statusLine = cycleLocked
+    ? "CYCLE CLOSED"
+    : !wallet
+      ? "WALLET REQUIRED"
+      : hasVoted
+        ? "INPUT LOCKED FOR CURRENT CYCLE"
+        : "AWAITING OBSERVATION";
+
+  const footerNote = utc;
+
+  const copyCA = async () => {
+    try{
+      if(navigator.clipboard?.writeText){
+        await navigator.clipboard.writeText(caValue);
+        setStatus("CA COPIED");
+        return;
+      }
+    }catch(err){
+      // fall through
+    }
+    setStatus("CA COPY FAILED");
+  };
+
+  const deliberation = Array.isArray(transmission?.deliberation) ? transmission.deliberation : [];
+  const consensusText = transmission?.consensus || transmission?.primary || "NO TRANSMISSION AVAILABLE";
 
   return (
     <div className="kairo">
@@ -118,14 +337,26 @@ export default function App() {
         <source src="/assets/kairo-bg.mp4" type="video/mp4"/>
         <source src="/assets/kairo.bg.mov" type="video/quicktime"/>
       </video>
+      <audio ref={audioRef} autoPlay loop preload="auto" muted aria-hidden="true">
+        <source src="/assets/kairo-sound.wav" type="audio/wav"/>
+      </audio>
+      <audio ref={buttonSoundRef} preload="auto" aria-hidden="true">
+        <source src="/assets/kairo-button-sound.wav" type="audio/wav"/>
+      </audio>
       <header className="headerBar">
         <div className="brand">
           <div className="brandName">KAIRO</div>
           <div className="brandTag">{tagline}</div>
         </div>
         <div className="meta">
-          <div className="utc">{utc}</div>
-          <div className="route">{status}</div>
+          <button
+            type="button"
+            className="walletButton"
+            onClick={() => {playButtonSound(); wallet ? disconnectWallet() : connectWallet();}}
+            aria-label={wallet ? "Disconnect wallet" : "Connect wallet"}
+          >
+            {formatWallet(wallet)}
+          </button>
         </div>
       </header>
 
@@ -133,11 +364,26 @@ export default function App() {
         <section className={"panel "+(glitch ? "glitch" : "")}>
           <div className="panelTop">
             <div className="panelLabel">TRANSMISSION</div>
-            <div className="integrity">INTEGRITY: {integrity}</div>
+            <div className="integrity">CYCLE {transmission?.cycleIndex || 0}</div>
+          </div>
+          <div className="panelMeta">
+            <div className="countdown">{countdown}</div>
           </div>
 
+          {deliberation.length ? (
+            <div className="deliberation">
+              <div className="deliberationLabel">DELIBERATION</div>
+              {deliberation.map((entry, idx) => (
+                <div key={`${entry?.speaker || "AGENT"}-${idx}`} className="deliberationLine">
+                  <span className="deliberationSpeaker">{entry?.speaker || "AGENT"}</span>
+                  <span className="deliberationText">{entry?.text || ""}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div className="txPrimary">
-            {transmission?.primary || "NO TRANSMISSION AVAILABLE"}
+            {consensusText}
           </div>
 
           {transmission?.secondary ? (
@@ -150,25 +396,46 @@ export default function App() {
                 key={s}
                 type="button"
                 className={"stance "+(stance===s ? "active" : "")}
-                onClick={() => {submitStance(s);}}
-                disabled={locked}
+                onClick={() => {playButtonSound(); submitStance(s);}}
+                disabled={!canVote}
                 aria-label={"Stance "+s}
               >
-                {s}
+                <span className="stanceLabel">{s}</span>
+                <span className="stanceCount">{counts?.[s] ?? 0}</span>
               </button>
             ))}
           </div>
 
-          <div className="statusLine">
-            {locked ? "INPUT LOCKED FOR CURRENT CYCLE" : "AWAITING OBSERVATION"}
-          </div>
+          <div className="statusLine">{statusLine}</div>
         </section>
       </main>
 
       <footer className="footer">
-        <div className="footLeft">{sigil}</div>
-        <div className="footRight">{footerNote}</div>
+        <div className="footLeft">
+          <div className="footTime">{footerNote}</div>
+        </div>
+        <div className="footCenter">
+          <button
+            type="button"
+            className="audioToggle"
+            onClick={() => {playButtonSound(); toggleAudio();}}
+            aria-label={audioOn ? "Pause audio" : "Play audio"}
+          >
+            {audioOn ? "PAUSE" : "PLAY"}
+          </button>
+        </div>
+        <div className="footRight">
+          <button
+            type="button"
+            className="copyButton"
+            onClick={() => {playButtonSound(); copyCA();}}
+            aria-label="Copy contract address"
+          >
+            COPY CA
+          </button>
+        </div>
       </footer>
     </div>
   );
 }
+

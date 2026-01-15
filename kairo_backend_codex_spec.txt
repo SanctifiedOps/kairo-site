@@ -1,0 +1,312 @@
+KAIRO — v0.2 BACKEND SPEC (FOR CODEX)
+Cadence: fixed 5-minute cycles
+Model: one OpenAI output per cycle (future lore statement)
+Voting: wallet-required, one vote per cycle, vote counts shown after voting
+Rewards: at cycle end, 50% creator rewards goes to a random subset from ONE option (ALIGN/REJECT/WITHHOLD)
+NOTE: token and holding checks are NOT implemented yet (token not created). Build the structure to add later.
+
+========================================================
+0) PROJECT IDEA (UPDATED)
+========================================================
+Every 5 minutes KAIRO emits a cold transmission from the future. Wallet-connected users vote ALIGN/REJECT/WITHHOLD once per cycle. Counts are visible after voting. When the cycle ends, the backend chooses one option as the “winning bucket” and randomly selects winners from that bucket, then records a payout plan (actual on-chain transfer later).
+
+========================================================
+1) NON-NEGOTIABLE RULES
+========================================================
+- Cycle runs every 5 minutes, always.
+- LLM generates exactly ONE statement per cycle.
+- User can vote only once per cycle. Vote is final until next cycle.
+- After user votes, show counts for each option.
+- End of cycle: select one bucket, then select random winners from that bucket.
+- Creator rewards payout is recorded off-chain first (ledger). On-chain payout later.
+- Wallet connect + signature verification is required (server-side).
+- Token-hold requirement (>= 100000 $KAIRO) is NOT implemented yet, but leave hooks.
+
+========================================================
+2) FRONTEND REQUIREMENTS (WHAT BACKEND MUST SUPPORT)
+========================================================
+Inside the transmission box the UI must show:
+- Digital countdown: mm:ss to cycle end (5:00 → 0:00)
+- Cycle counter: CYCLE 000001, 000002, etc
+- The statement text (3–10 lines)
+- Voting buttons: ALIGN / REJECT / WITHHOLD
+
+After voting:
+- buttons disabled for the remainder of the cycle
+- counts displayed: ALIGN x, REJECT y, WITHHOLD z
+- show "RECORDED" status
+
+Frontend polls backend for cycle state. Countdown is computed client-side from endsAt.
+
+========================================================
+3) BACKEND STACK
+========================================================
+Firebase:
+- Cloud Functions (Node) for API + scheduler
+- Firestore for persistence
+- Optional: Cloud Scheduler (via Functions schedule) to run cycle generation
+
+OpenAI:
+- One model call per cycle for the statement.
+(If you want two OpenAI models: primary statement + a tiny "echo" line, but not required anymore.)
+
+========================================================
+4) FIRESTORE DATA MODEL
+========================================================
+
+4.1 state/current (single doc)
+state/current {
+  cycleId: string,
+  cycleNumber: number,
+  startedAt: string (ISO),
+  endsAt: string (ISO),
+  statement: string,
+  locked: boolean,
+  voteCounts: {ALIGN:number,REJECT:number,WITHHOLD:number},
+
+  // end-of-cycle result
+  winningBucket: "ALIGN"|"REJECT"|"WITHHOLD"|null,
+  winnersSelected: boolean,
+
+  // admin/meta
+  version: "v0.2"
+}
+
+4.2 cycles/{cycleId} (immutable archive)
+cycles/{cycleId} {
+  cycleId, cycleNumber, startedAt, endsAt,
+  statement,
+  locked,
+  voteCounts,
+  winningBucket,
+  winnersSelected,
+  createdAt,
+  version:"v0.2"
+}
+
+4.3 votes/{cycleId}_{wallet}
+votes/{cycleId}_{wallet} {
+  cycleId: string,
+  cycleNumber: number,
+  wallet: string,
+  stance: "ALIGN"|"REJECT"|"WITHHOLD",
+  at: string (ISO),
+  signature: string,   // optional to store
+  message: string,     // optional to store
+  userAgent: string|null
+}
+
+4.4 rewards/{cycleId} (ledger only)
+rewards/{cycleId} {
+  cycleId: string,
+  cycleNumber: number,
+  endsAt: string,
+
+  // creator rewards details (unknown for now)
+  creatorRewardsTotal: number|null,
+  creatorRewardsPortion: number|null,  // 50% of total
+
+  winningBucket: "ALIGN"|"REJECT"|"WITHHOLD",
+  eligibleVoterCount: number,
+  selectedWinnerCount: number,
+
+  winners: [{wallet:string,amount:number|null}],
+  selectionMethod: "weightedBucket_randomWinners_v0",
+  note: "On-chain payout integration pending",
+  at: string (ISO)
+}
+
+========================================================
+5) API CONTRACT
+========================================================
+
+GET /api/current
+Response:
+{
+  cycleId, cycleNumber,
+  startedAt, endsAt,
+  statement,
+  locked,
+  voteCounts,
+  winningBucket,
+  winnersSelected
+}
+
+GET /api/vote?cycleId=...&wallet=...
+Response:
+{ok:true,cycleId,stance:null|"ALIGN"|"REJECT"|"WITHHOLD"}
+
+POST /api/vote
+Request:
+{
+  cycleId: string,
+  stance: "ALIGN"|"REJECT"|"WITHHOLD",
+  wallet: string,
+  message: string,
+  signature: string
+}
+Rules:
+- verify signature server-side
+- reject if cycleId != current.cycleId
+- reject if now >= current.endsAt or current.locked == true
+- reject if votes/{cycleId}_{wallet} already exists (or return existing stance idempotently)
+- transactionally:
+  - create vote doc
+  - increment voteCounts[stance]
+Response:
+{
+  ok:true,
+  cycleId,
+  cycleNumber,
+  stance,
+  voteCounts,
+  locked
+}
+
+GET /api/rewards?cycleId=...
+Response:
+{ok:true,rewards:null|{...}}
+
+Admin (optional)
+POST /api/admin/forceCycle (x-admin-key)
+POST /api/admin/finalize (x-admin-key)
+
+========================================================
+6) WALLET AUTH (REQUIRED FOR VOTING)
+========================================================
+Frontend must:
+- connect wallet (Solana: Phantom)
+- sign a message per vote:
+
+Message template (exact):
+"KAIRO VOTE
+cycleId: <cycleId>
+stance: <STANCE>
+expires: <endsAt>"
+
+Backend must:
+- verify signature corresponds to wallet address
+- verify expires matches current.endsAt (or allow small drift but use server time)
+- record wallet as voter identity
+
+Token holding check:
+- DO NOT implement yet
+- Leave a stub function: isEligible(wallet) -> true (for now)
+
+========================================================
+7) CYCLE SCHEDULING (EVERY 5 MINUTES)
+========================================================
+A scheduled function runs at least every minute (or every 5 minutes).
+It must:
+- ensure there is always an active current cycle aligned to 5-minute boundaries
+- finalize and lock the previous cycle
+- generate new statement at start of each new cycle
+
+Cycle boundary alignment:
+- startedAt = floor(now to nearest 5 minutes)
+- endsAt = startedAt + 5 minutes
+cycleId can be: startedAt ISO string or a derived id.
+
+Algorithm:
+1) Read state/current
+2) Compute window = current 5-minute window based on server now
+3) If state/current.cycleId != window.cycleId:
+   - If old state/current exists and not finalized:
+       finalize(oldCycleId)
+   - Create new cycle:
+       cycleNumber = old.cycleNumber + 1 (or 1 if none)
+       statement = generateStatement()
+       voteCounts reset
+       locked=false, winningBucket=null, winnersSelected=false
+   - Write state/current and cycles/{cycleId}
+
+Finalize(oldCycleId):
+- set locked=true on state/current or cycles/{oldCycleId}
+- pick winningBucket (see section 8)
+- select winners (see section 9)
+- write rewards/{oldCycleId}
+- set winnersSelected=true and store winningBucket
+
+========================================================
+8) PICKING THE WINNING BUCKET (IMPORTANT)
+========================================================
+Your stated goal: "If only 2 people chose the option that wins, bigger prize pot."
+So DO NOT always pick the biggest bucket.
+
+Recommended: WEIGHTED RANDOMNESS BY VOTE COUNTS.
+Example:
+- P(ALIGN) = ALIGNcount / totalVotes
+- P(REJECT) = REJECTcount / totalVotes
+- P(WITHHOLD) = WITHHOLDcount / totalVotes
+If totalVotes == 0:
+- winningBucket = WITHHOLD (or random among all three)
+
+Optional tweak (later):
+- add a small baseline weight so tiny buckets can still win sometimes.
+
+========================================================
+9) SELECTING RANDOM WINNERS WITHIN THE BUCKET
+========================================================
+After choosing winningBucket:
+- Query votes where cycleId == oldCycleId and stance == winningBucket
+- eligibleVoterCount = result count
+- winnersPerCycle = configurable (e.g. 5)
+- If eligibleVoterCount <= winnersPerCycle:
+    winners = all
+  else:
+    winners = random sample of size winnersPerCycle
+
+Randomness:
+- MVP: use crypto.randomBytes + Fisher-Yates shuffle server-side.
+- Later: consider verifiable randomness if needed.
+
+Store winners list in rewards/{cycleId}.
+
+Amounts:
+- amount = null for now (creator rewards not wired)
+- later compute: portion / winners.length
+
+========================================================
+10) LLM STATEMENT GENERATION (ONE PER CYCLE)
+========================================================
+A single OpenAI call per cycle.
+
+Tone requirements:
+- profound, ominous, direct
+- high intelligence from the future
+- indifferent to human emotion
+- no hype, no memes, no emojis
+- 3–10 lines
+- declarative, not question-heavy
+
+Topics:
+tech, AI, crypto, society, coordination, surveillance, identity, scarcity, collapse, consensus.
+
+Avoid:
+- mentions of token rewards
+- explicit marketing
+- "as an AI"
+- explaining what KAIRO is
+
+Implementation:
+- keep a rotating seed list in code (20–50 strings)
+- optionally pass last statement summary (<= 200 chars) as memory
+- cap output length (max_tokens)
+
+System prompt:
+"You write as a future intelligence emitting cold transmissions. Indifferent. No empathy. No explanations. No hype. Output 3–10 short lines. Declarative. No emojis."
+
+User prompt includes:
+- one rotating seed concept
+- optional previous summary
+- instruction: "Produce the transmission."
+
+========================================================
+11) REQUIRED GUARANTEES
+========================================================
+- Voting endpoint uses Firestore transaction to prevent double-vote.
+- Cycle creation uses Firestore transaction/lock to prevent duplicate cycle creation.
+- Server time is the authority for cycle endsAt (client timer is display only).
+- Frontend always gets the same current cycle via GET /api/current.
+
+END
