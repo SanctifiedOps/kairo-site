@@ -1,0 +1,523 @@
+KAIRO FRONTEND BRIEF (FOR CODEX) — VITE + REACT (HTML/CSS/JS ONLY)
+Version: v0.1
+Goal: Build an obscure, dystopian, glitchy terminal-like interface that feels like a recovered monitoring console. Minimal UI. High intentionality. No hype. No gamified UI elements. No emojis.
+
+------------------------------------------------------------------
+1) CORE FEEL / BRAND
+------------------------------------------------------------------
+- Mood: obscure, dystopian, clinical, future residue. “Internal system console leaked into public.”
+- Aesthetic: black/near-black background, off-white text, subtle desaturated green/cyan accent.
+- Typography: mono for UI + small caps feel. Use system mono stack (no external fonts required).
+- Motion: subtle, ambient. No flashy transitions. Support prefers-reduced-motion.
+- Noise: slight scanlines + film grain + occasional glitch distort on the transmission block.
+- Content tone: terse system logs. No explanations. No friendly onboarding.
+
+Tagline candidate: “EVERYTHING YOU SEE IS RESIDUAL”
+Project name: KAIRO / 回路 (optional)
+
+------------------------------------------------------------------
+2) FIRST SCREEN (ABOVE THE FOLD)
+------------------------------------------------------------------
+Layout: single column, centered, max width ~720px.
+Elements (top → bottom):
+A) Header strip (small)
+   - Left: KAIRO
+   - Right: UTC timestamp + “ROUTE: DEGRADED” (or similar)
+B) Main transmission panel (focus)
+   - Big block of text (primary transmission)
+   - Secondary smaller line (optional: “residual variation”)
+   - A “signal integrity” meter that is NOT a progress bar (just text labels: LOW/MED/HIGH)
+C) Three stance actions
+   - ALIGN / REJECT / WITHHOLD
+   - Selecting shows a subtle state change (no confetti, no “success”)
+D) Footer microcopy
+   - “OBSERVATION RECORDED” / “NO RESPONSE REQUIRED” / “CONGESTION INCREASED” (contextual)
+
+Critical: when user clicks a stance, something MUST change visually (even if no reward).
+Examples:
+- status line changes
+- faint glitch pulse
+- button locks for current cycle
+- “RECORDED” indicator toggles
+
+------------------------------------------------------------------
+3) NAV / ROUTES (MINIMAL)
+------------------------------------------------------------------
+Use React Router only if needed. Prefer single page for MVP.
+Optional hidden routes (for later):
+- /archive (read-only list of past transmissions)
+- /status (system health, minimal)
+
+Do NOT add:
+- explainer pages
+- roadmap
+- FAQ
+- long lore pages
+
+------------------------------------------------------------------
+4) UI COMPONENTS (REACT)
+------------------------------------------------------------------
+Components (keep small and simple):
+- <App/>
+- <ConsoleShell/>
+- <HeaderBar/>
+- <TransmissionCard/>
+- <StanceButtons/>
+- <StatusLine/>
+Optional:
+- <ArchiveDrawer/> (collapsed by default, feels like a hidden panel)
+
+State concepts:
+- cycleId (string)
+- transmission {primary,secondary,at,integrity}
+- stance (ALIGN|REJECT|WITHHOLD|null)
+- locked (boolean)
+- statusText (string)
+
+Behaviors:
+- Poll backend /api/last every 5–10 seconds (or use SSE later).
+- POST /api/stance with stance selection (for now just store locally if backend not ready).
+- On click: optimistic UI update (recorded), then confirm from server.
+
+------------------------------------------------------------------
+5) VISUAL SYSTEM / CSS TOKENS
+------------------------------------------------------------------
+Use CSS variables:
+:root {
+  --bg:#050607;
+  --panel:#0a0c0d;
+  --text:#e7e3da;
+  --muted:#a7a39a;
+  --accent:#7fffd4;      // can be toned down
+  --danger:#ff4d4d;      // use sparingly
+  --border:rgba(255,255,255,0.08);
+  --glow:rgba(127,255,212,0.12);
+  --shadow:0 10px 30px rgba(0,0,0,0.55);
+  --radius:14px;
+  --mono:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+Effects (subtle):
+- Panel border + inner glow
+- Hover: slight brighten + border increase
+- Background overlay:
+  - scanlines (repeating-linear-gradient)
+  - grain (tiny opacity noise via CSS animation or background-image)
+  - vignette
+
+Glitch effect guidelines:
+- Apply glitch only to transmission title line or occasionally to the whole card for 150–300ms.
+- Randomize via setInterval with low frequency (e.g. every 10–30s).
+- Respect prefers-reduced-motion (disable glitch + animations).
+
+------------------------------------------------------------------
+6) ACCESSIBILITY / UX
+------------------------------------------------------------------
+- Maintain readable contrast.
+- Buttons should be keyboard-focusable with visible focus ring.
+- Provide aria-labels for stance buttons.
+- Prefer reduced motion.
+- Do not force audio.
+
+------------------------------------------------------------------
+7) FILES TO IMPLEMENT (VITE REACT)
+------------------------------------------------------------------
+Create/modify:
+- src/App.jsx
+- src/App.css
+- src/main.jsx
+- src/index.css
+
+Keep CSS in App.css + index.css (no Tailwind, no external UI libs).
+
+------------------------------------------------------------------
+8) CODE SKELETON (USE THIS STYLE)
+------------------------------------------------------------------
+IMPORTANT STYLE:
+- Arrow functions must use parentheses: (e) => {}
+- Minimal spaces inside object braces: {a:1}
+- Keep components small, no refactors not requested.
+- Use fetch with async/await, basic error handling.
+
+--- src/main.jsx ---
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App.jsx";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App/>
+  </React.StrictMode>
+);
+
+--- src/App.jsx ---
+import {useEffect,useMemo,useRef,useState} from "react";
+import "./App.css";
+
+const STANCES = ["ALIGN","REJECT","WITHHOLD"];
+
+const nowUtc = () => {
+  const d = new Date();
+  return d.toISOString().replace("T"," ").replace("Z"," UTC");
+};
+
+export default function App() {
+  const [transmission,setTransmission] = useState(null);
+  const [stance,setStance] = useState(null);
+  const [locked,setLocked] = useState(false);
+  const [status,setStatus] = useState("ROUTE: DEGRADED");
+  const [glitch,setGlitch] = useState(false);
+  const lastGlitchRef = useRef(0);
+
+  const tagline = "EVERYTHING YOU SEE IS RESIDUAL";
+
+  const integrity = useMemo(() => {
+    if(!transmission?.integrity) return "LOW";
+    return transmission.integrity;
+  },[transmission]);
+
+  const triggerGlitch = () => {
+    const now = Date.now();
+    if(now - lastGlitchRef.current < 1500) return;
+    lastGlitchRef.current = now;
+    setGlitch(true);
+    window.setTimeout(() => {setGlitch(false);},220);
+  };
+
+  const fetchLast = async () => {
+    try{
+      const r = await fetch("/api/last");
+      const j = await r.json();
+      if(j?.primary){
+        setTransmission(j);
+      }
+    }catch(err){
+      // keep silent; status can degrade
+      setStatus("ROUTE: OFFLINE");
+    }
+  };
+
+  useEffect(() => {
+    fetchLast();
+    const t = window.setInterval(() => {fetchLast();},8000);
+    return () => {window.clearInterval(t);};
+  },[]);
+
+  useEffect(() => {
+    // occasional ambient glitch
+    const t = window.setInterval(() => {
+      const chance = Math.random();
+      if(chance < 0.18) triggerGlitch();
+    },12000);
+    return () => {window.clearInterval(t);};
+  },[]);
+
+  const submitStance = async (next) => {
+    if(locked) return;
+    setStance(next);
+    setLocked(true);
+    setStatus("OBSERVATION RECORDED");
+    triggerGlitch();
+
+    try{
+      await fetch("/api/stance",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({stance:next,at:new Date().toISOString()})
+      });
+      setStatus("RECORDED");
+    }catch(err){
+      // still keep the recorded feel, but degrade status subtly
+      setStatus("RECORDED (DEGRADED)");
+    }
+  };
+
+  return (
+    <div className="kairo">
+      <div className="bgOverlays" aria-hidden="true"/>
+      <header className="headerBar">
+        <div className="brand">
+          <div className="brandName">KAIRO</div>
+          <div className="brandTag">{tagline}</div>
+        </div>
+        <div className="meta">
+          <div className="utc">{nowUtc()}</div>
+          <div className="route">{status}</div>
+        </div>
+      </header>
+
+      <main className="shell">
+        <section className={"panel "+(glitch ? "glitch" : "")}>
+          <div className="panelTop">
+            <div className="panelLabel">TRANSMISSION</div>
+            <div className="integrity">INTEGRITY: {integrity}</div>
+          </div>
+
+          <div className="txPrimary">
+            {transmission?.primary || "NO TRANSMISSION AVAILABLE"}
+          </div>
+
+          {transmission?.secondary ? (
+            <div className="txSecondary">{transmission.secondary}</div>
+          ) : null}
+
+          <div className="stanceRow">
+            {STANCES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={"stance "+(stance===s ? "active" : "")}
+                onClick={() => {submitStance(s);}}
+                disabled={locked}
+                aria-label={"Stance "+s}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          <div className="statusLine">{locked ? "INPUT LOCKED FOR CURRENT CYCLE" : "AWAITING OBSERVATION"}</div>
+        </section>
+      </main>
+
+      <footer className="footer">
+        <div className="footLeft">回路</div>
+        <div className="footRight">CONTEXT: MISSING</div>
+      </footer>
+    </div>
+  );
+}
+
+--- src/index.css ---
+:root{
+  --bg:#050607;
+  --panel:#0a0c0d;
+  --text:#e7e3da;
+  --muted:#a7a39a;
+  --accent:#7fffd4;
+  --border:rgba(255,255,255,0.08);
+  --glow:rgba(127,255,212,0.12);
+  --shadow:0 10px 30px rgba(0,0,0,0.55);
+  --radius:14px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+}
+
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;
+  font-family:var(--mono);
+  background:var(--bg);
+  color:var(--text);
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important;transition:none !important;}
+}
+
+--- src/App.css ---
+.kairo{
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  position:relative;
+  overflow:hidden;
+}
+
+.bgOverlays{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:
+    radial-gradient(1200px 700px at 50% 20%, rgba(127,255,212,0.07), transparent 60%),
+    radial-gradient(900px 500px at 20% 80%, rgba(255,255,255,0.03), transparent 55%),
+    repeating-linear-gradient(to bottom, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px, transparent 3px, transparent 6px);
+  opacity:0.55;
+  mix-blend-mode:screen;
+  filter:contrast(1.05);
+}
+
+.headerBar{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  padding:18px 18px 6px 18px;
+  border-bottom:1px solid var(--border);
+  position:relative;
+  z-index:2;
+}
+
+.brandName{
+  letter-spacing:0.28em;
+  font-size:14px;
+  color:var(--text);
+}
+
+.brandTag{
+  margin-top:6px;
+  font-size:11px;
+  color:var(--muted);
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+}
+
+.meta{
+  text-align:right;
+  font-size:11px;
+  color:var(--muted);
+}
+
+.route{
+  margin-top:6px;
+  color:var(--text);
+  opacity:0.85;
+}
+
+.shell{
+  flex:1;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  padding:18px;
+  position:relative;
+  z-index:2;
+}
+
+.panel{
+  width:min(720px,100%);
+  background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:18px;
+  position:relative;
+  overflow:hidden;
+}
+
+.panel:before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius:var(--radius);
+  box-shadow:0 0 0 1px rgba(127,255,212,0.06) inset;
+  pointer-events:none;
+}
+
+.panelTop{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:12px;
+}
+
+.panelLabel{
+  font-size:11px;
+  letter-spacing:0.22em;
+  color:var(--muted);
+}
+
+.integrity{
+  font-size:11px;
+  color:var(--muted);
+}
+
+.txPrimary{
+  white-space:pre-wrap;
+  line-height:1.45;
+  font-size:14px;
+  color:var(--text);
+  padding:12px 0 8px 0;
+}
+
+.txSecondary{
+  white-space:pre-wrap;
+  line-height:1.45;
+  font-size:12px;
+  color:var(--muted);
+  border-top:1px dashed rgba(255,255,255,0.10);
+  padding-top:10px;
+  margin-top:6px;
+}
+
+.stanceRow{
+  display:flex;
+  gap:10px;
+  margin-top:14px;
+}
+
+.stance{
+  flex:1;
+  padding:10px 10px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,0.10);
+  background:rgba(10,12,13,0.6);
+  color:var(--text);
+  font-family:var(--mono);
+  letter-spacing:0.16em;
+  font-size:11px;
+  cursor:pointer;
+}
+
+.stance:hover{
+  border-color:rgba(127,255,212,0.25);
+  box-shadow:0 0 0 3px rgba(127,255,212,0.06);
+}
+
+.stance:disabled{
+  opacity:0.55;
+  cursor:not-allowed;
+}
+
+.stance.active{
+  border-color:rgba(127,255,212,0.35);
+  box-shadow:0 0 0 3px rgba(127,255,212,0.10);
+}
+
+.statusLine{
+  margin-top:12px;
+  font-size:11px;
+  color:var(--muted);
+  letter-spacing:0.10em;
+  text-transform:uppercase;
+}
+
+.footer{
+  display:flex;
+  justify-content:space-between;
+  padding:10px 18px 16px 18px;
+  color:var(--muted);
+  font-size:11px;
+  border-top:1px solid var(--border);
+  position:relative;
+  z-index:2;
+}
+
+.glitch{
+  animation:glitchPulse 220ms steps(2,end);
+}
+
+@keyframes glitchPulse{
+  0%{transform:translate3d(0,0,0);filter:none;}
+  35%{transform:translate3d(-1px,0,0);filter:contrast(1.25) saturate(1.05);}
+  70%{transform:translate3d(1px,0,0);filter:contrast(1.15) saturate(1.03);}
+  100%{transform:translate3d(0,0,0);filter:none;}
+}
+
+------------------------------------------------------------------
+9) INTEGRATION NOTE (BACKEND)
+------------------------------------------------------------------
+Frontend expects:
+- GET  /api/last  -> {primary,secondary,integrity,at}
+- POST /api/stance -> {ok:true}
+For MVP, /api/stance can just store memory and return ok.
+
+------------------------------------------------------------------
+10) KEY DESIGN CONSTRAINTS
+------------------------------------------------------------------
+- Keep it obscure. No onboarding. No tooltips.
+- Keep it dystopian. Avoid bright neon city tropes and characters.
+- Keep it reactive. Clicks must change state immediately.
+- Keep it minimal. One screen should carry the experience.
+
+END.
