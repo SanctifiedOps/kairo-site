@@ -9,6 +9,7 @@ import path from "path";
 import {Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction} from "@solana/web3.js";
 import bs58 from "bs58";
 import {OnlinePumpSdk} from "@pump-fun/pump-sdk";
+import TelegramBot from "node-telegram-bot-api";
 
 const app = express();
 app.use(express.json());
@@ -48,6 +49,10 @@ const PUMPFUN_SDK_FACTORY = process.env.PUMPFUN_SDK_FACTORY || "createPumpFunSdk
 const TOKEN_MINT_ADDRESS = process.env.TOKEN_MINT_ADDRESS || "";
 const TOKEN_MIN_BALANCE = Number(process.env.TOKEN_MIN_BALANCE || 100000);
 const ENABLE_TOKEN_GATING = process.env.ENABLE_TOKEN_GATING === "true";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID || "";
+const TELEGRAM_VIDEO_PATH = process.env.TELEGRAM_VIDEO_PATH || "./public/assets/kairo-bg.mp4";
+const TELEGRAM_POSTING_ENABLED = process.env.TELEGRAM_POSTING_ENABLED === "true";
 
 const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
 const SYSTEM_AUDITOR = "You are AUDITOR: a verifier. You enforce constraints. You remove fluff. You prevent repetition and contradictions. You are harsh and concise.";
@@ -66,6 +71,7 @@ const buildAuditorSystem = () => [
 
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY}) : null;
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY}) : null;
+const telegramBot = TELEGRAM_BOT_TOKEN ? new TelegramBot(TELEGRAM_BOT_TOKEN, {polling: false}) : null;
 let db = null;
 
 const inMem = {
@@ -1704,6 +1710,35 @@ const finalizeCycle = async (state) => {
   return reward;
 };
 
+const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
+  if(!TELEGRAM_POSTING_ENABLED || !telegramBot || !TELEGRAM_CHANNEL_ID){
+    return;
+  }
+
+  try{
+    const videoPath = path.join(__dirname, TELEGRAM_VIDEO_PATH);
+    if(!fs.existsSync(videoPath)){
+      logger.error("Telegram video file not found", {videoPath});
+      return;
+    }
+
+    const caption = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${transmission}\n\n#KAIRO #CYCLE${cycleIndex}`;
+
+    await telegramBot.sendVideo(TELEGRAM_CHANNEL_ID, videoPath, {
+      caption,
+      parse_mode: 'HTML'
+    });
+
+    logger.info("Posted to Telegram", {cycleId, cycleIndex, channelId: TELEGRAM_CHANNEL_ID});
+  }catch(err){
+    logger.error("Failed to post to Telegram", {
+      error: err.message,
+      cycleId,
+      channelId: TELEGRAM_CHANNEL_ID
+    });
+  }
+};
+
 const generateCycle = async ({seed, createdBy}) => {
   const prior = await getLatestState();
   await finalizeCycle(prior);
@@ -1786,6 +1821,13 @@ const generateCycle = async ({seed, createdBy}) => {
     actorId:null,
     at,
     payload:{createdBy:cycleDoc.createdBy}
+  });
+
+  // Post to Telegram channel
+  await postToTelegram({
+    transmission,
+    cycleIndex,
+    cycleId
   });
 
   return latest;
