@@ -38,6 +38,7 @@ const MAX_TRACE_TOKENS = Number(process.env.MAX_TRACE_TOKENS || 80);
 const REPEAT_THRESHOLD = Number(process.env.REPEAT_THRESHOLD || 0.22);
 const WINNERS_PER_CYCLE = Number(process.env.WINNERS_PER_CYCLE || 5);
 const CYCLE_INTERVAL_MINUTES = Number(process.env.CYCLE_INTERVAL_MINUTES || 5);
+const CYCLE_LOCK_TTL_MS = Number(process.env.CYCLE_LOCK_TTL_MS || 120000);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 6);
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.HELIUS_RPC_URL || "";
@@ -175,6 +176,42 @@ const getCycleWindow = (timestampMs = Date.now()) => {
     endsAtMs,
     windowId:`w_${startsAtMs.toString(36)}`
   };
+};
+
+const tryAcquireCycleLock = async (windowId) => {
+  if(!db) return true;
+  const lockRef = db.collection("locks").doc(`cycle_${windowId}`);
+  const now = Date.now();
+  try{
+    await db.runTransaction(async (t) => {
+      const snap = await t.get(lockRef);
+      const data = snap.exists ? snap.data() : null;
+      const status = data?.status || null;
+      const startedAtMs = data?.startedAt ? Date.parse(data.startedAt) : 0;
+      const isStale = !startedAtMs || (now - startedAtMs) > CYCLE_LOCK_TTL_MS;
+      if(status === "completed") throw new Error("DONE");
+      if(status === "processing" && !isStale) throw new Error("LOCKED");
+      t.set(lockRef, {status:"processing", startedAt:new Date(now).toISOString()}, {merge:true});
+    });
+    return true;
+  }catch(err){
+    if(err?.message === "LOCKED" || err?.message === "DONE") return false;
+    logger.warn("Failed to acquire cycle lock", {windowId, error:err.message});
+    return false;
+  }
+};
+
+const completeCycleLock = async (windowId, cycleId) => {
+  if(!db) return;
+  try{
+    await db.collection("locks").doc(`cycle_${windowId}`).set({
+      status:"completed",
+      completedAt:nowIso(),
+      cycleId
+    }, {merge:true});
+  }catch(err){
+    logger.warn("Failed to complete cycle lock", {windowId, error:err.message});
+  }
 };
 
 const defaultCounts = () => ({ALIGN:0,REJECT:0,WITHHOLD:0});
@@ -1798,13 +1835,13 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
   }
 };
 
-const generateCycle = async ({seed, createdBy}) => {
+const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   const prior = await getLatestState();
   await finalizeCycle(prior);
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
   const cycleIndex = (prior?.cycleIndex || 0) + 1;
-  const window = getCycleWindow();
+  const window = cycleWindow || getCycleWindow();
   const cycleId = `c_${window.startsAtMs.toString(36)}_${randomUUID().slice(0,8)}`;
   const at = window.startsAt;
   const cycleEndsAt = window.endsAt;
@@ -1900,7 +1937,21 @@ const maybeRotateCycle = async () => {
 
   if(!state){
     logger.info("No state found, generating boot cycle");
-    return generateCycle({seed:null, createdBy:"boot"});
+    const acquired = await tryAcquireCycleLock(currentWindow.windowId);
+    if(!acquired){
+      return await getLatestState();
+    }
+    const latest = await getLatestState();
+    if(latest?.at){
+      const latestWindow = getCycleWindow(Date.parse(latest.at) || 0);
+      if(latestWindow.windowId === currentWindow.windowId){
+        await completeCycleLock(currentWindow.windowId, latest.cycleId);
+        return latest;
+      }
+    }
+    const created = await generateCycle({seed:null, createdBy:"boot", cycleWindow:currentWindow});
+    await completeCycleLock(currentWindow.windowId, created?.cycleId);
+    return created;
   }
 
   const stateWindowMs = state.at ? Date.parse(state.at) : 0;
@@ -1911,7 +1962,22 @@ const maybeRotateCycle = async () => {
       oldWindow:stateWindow.windowId,
       newWindow:currentWindow.windowId
     });
-    return generateCycle({seed:null, createdBy:"auto"});
+    const acquired = await tryAcquireCycleLock(currentWindow.windowId);
+    if(!acquired){
+      logger.warn("Cycle generation already in progress", {windowId:currentWindow.windowId});
+      return await getLatestState();
+    }
+    const latest = await getLatestState();
+    if(latest?.at){
+      const latestWindow = getCycleWindow(Date.parse(latest.at) || 0);
+      if(latestWindow.windowId === currentWindow.windowId){
+        await completeCycleLock(currentWindow.windowId, latest.cycleId);
+        return latest;
+      }
+    }
+    const created = await generateCycle({seed:null, createdBy:"auto", cycleWindow:currentWindow});
+    await completeCycleLock(currentWindow.windowId, created?.cycleId);
+    return created;
   }
 
   if(isLocked(state)){

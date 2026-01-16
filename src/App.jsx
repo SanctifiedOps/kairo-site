@@ -110,14 +110,38 @@ export default function App() {
   },[]);
 
   const consensusText = transmission?.consensus || transmission?.primary || "NO TRANSMISSION AVAILABLE";
-  const finalChars = useMemo(() => {
-    return (consensusText || "").split("").map((char) => ({
-      char,
-      delay:`${(Math.random() * 1.8).toFixed(2)}s`,
-      duration:`${(1.2 + Math.random() * 2.4).toFixed(2)}s`,
-      flip:`${(Math.random() * 6 - 3).toFixed(1)}deg`,
-      hue:`${(Math.random() * 12 - 6).toFixed(1)}deg`
-    }));
+  const finalTokens = useMemo(() => {
+    const tokens = [];
+    let word = [];
+    const pushWord = () => {
+      if(word.length){
+        tokens.push({type:"word", chars:word});
+        word = [];
+      }
+    };
+    const text = consensusText || "";
+    for(let i = 0; i < text.length; i += 1){
+      const char = text[i];
+      if(char === "\n"){
+        pushWord();
+        tokens.push({type:"newline"});
+        continue;
+      }
+      if(char === " "){
+        pushWord();
+        tokens.push({type:"space"});
+        continue;
+      }
+      word.push({
+        char,
+        delay:`${(Math.random() * 1.8).toFixed(2)}s`,
+        duration:`${(1.2 + Math.random() * 2.4).toFixed(2)}s`,
+        flip:`${(Math.random() * 6 - 3).toFixed(1)}deg`,
+        hue:`${(Math.random() * 12 - 6).toFixed(1)}deg`
+      });
+    }
+    pushWord();
+    return tokens;
   },[consensusText]);
 
   useEffect(() => {
@@ -584,24 +608,28 @@ export default function App() {
           <div className={`txPrimary ${showConsensus ? "final" : "pending"}`}>
             {showConsensus ? (
               <span className="signalText">
-                {finalChars.map((item, idx) => (
-                  item.char === "\n"
-                    ? <br key={`br-${idx}`}/>
-                    : (
-                      <span
-                        key={`ch-${idx}`}
-                        className="signalChar"
-                        style={{
-                          "--pulse-delay": item.delay,
-                          "--pulse-duration": item.duration,
-                          "--flip": item.flip,
-                          "--hue": item.hue
-                        }}
-                      >
-                        {item.char}
-                      </span>
-                    )
-                ))}
+                {finalTokens.map((token, idx) => {
+                  if(token.type === "newline") return <br key={`br-${idx}`}/>;
+                  if(token.type === "space") return <span key={`sp-${idx}`} className="signalSpace"> </span>;
+                  return (
+                    <span key={`word-${idx}`} className="signalWord">
+                      {token.chars.map((item, charIdx) => (
+                        <span
+                          key={`ch-${idx}-${charIdx}`}
+                          className="signalChar"
+                          style={{
+                            "--pulse-delay": item.delay,
+                            "--pulse-duration": item.duration,
+                            "--flip": item.flip,
+                            "--hue": item.hue
+                          }}
+                        >
+                          {item.char}
+                        </span>
+                      ))}
+                    </span>
+                  );
+                })}
               </span>
             ) : (
               <span className={`signalTyping ${typedTransmission ? "active" : ""}`}>{typedTransmission}</span>
@@ -652,6 +680,30 @@ export default function App() {
           >
             COPY CA
           </button>
+          <div className="footLinks">
+            <div className="footLinkItem">
+              <span className="footLinkLabel">Telegram:</span>
+              <a
+                className="footLink"
+                href="https://t.me/kairoresidual"
+                target="_blank"
+                rel="noreferrer"
+              >
+                t.me/kairoresidual
+              </a>
+            </div>
+            <div className="footLinkItem">
+              <span className="footLinkLabel">Follow on X:</span>
+              <a
+                className="footLink"
+                href="https://x.com/kairoresidual"
+                target="_blank"
+                rel="noreferrer"
+              >
+                x.com/kairoresidual
+              </a>
+            </div>
+          </div>
         </div>
       </footer>
 
