@@ -1088,8 +1088,8 @@ const getAnthropicModel = (fallbackModel) => {
   return CLAUDE_MODEL;
 };
 
-const DRAFT_LINE_LIMIT = 6;
-const FINAL_LINE_LIMIT = 6;
+const DRAFT_LINE_LIMIT = 3;
+const FINAL_LINE_LIMIT = 3;
 
 const getClaudeText = async ({system, user, maxTokens, temperature}) => {
   const text = await callAnthropic({
@@ -1191,7 +1191,7 @@ const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSumma
   }
   parts.push(doctrineBlock);
   parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
-  parts.push("Instruction: Draft 4-6 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
+  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
   return parts.join("\n");
 };
 
@@ -1224,7 +1224,7 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
     changes,
     "AVOID PHRASES:",
     avoid,
-    `Instruction: Produce the final transmission in 3-6 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). ${reroll ? "Choose a different angle within the same topic." : ""}`
+    `Instruction: Produce the final transmission in 2-3 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). ${reroll ? "Choose a different angle within the same topic." : ""}`
   ].join("\n");
 };
 

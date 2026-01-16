@@ -128,16 +128,16 @@ export default function App() {
         if(current === "\n"){
           chars.push("\n");
           setTypedTransmission(chars.join(""));
-          await delay(60);
+          await delay(30);
           continue;
         }
         const wrong = GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
         chars.push(wrong);
         setTypedTransmission(chars.join(""));
-        await delay(20 + Math.floor(Math.random() * 40));
+        await delay(10 + Math.floor(Math.random() * 20));
         chars[chars.length - 1] = current;
         setTypedTransmission(chars.join(""));
-        await delay(20 + Math.floor(Math.random() * 50));
+        await delay(10 + Math.floor(Math.random() * 25));
       }
     };
 
