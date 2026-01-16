@@ -284,24 +284,24 @@ export default function App() {
   const submitStance = async (next) => {
     if(cycleLocked){
       setStatus("CYCLE CLOSED");
-      showToast("Cycle is closed. Voting is locked.", "error");
+      showToast("CYCLE TERMINATED. SIGNAL WINDOW CLOSED.", "error");
       return;
     }
     if(hasVoted){
       setStatus("INPUT LOCKED");
-      showToast("You have already voted this cycle.", "warning");
+      showToast("INPUT LOCKED: OBSERVATION ALREADY RECORDED.", "warning");
       return;
     }
     if(!wallet){
       setStatus("WALLET REQUIRED");
-      showToast("Connect your wallet to vote.", "warning");
+      showToast("ACTOR IDENTITY REQUIRED. SIGNAL SOURCE MISSING.", "warning");
       return;
     }
 
     const provider = walletProvider || getProvider();
     if(!provider){
       setStatus("WALLET NOT FOUND");
-      showToast("Wallet provider not found. Install Phantom or Solflare.", "error");
+      showToast("SIGNAL INTERFACE OFFLINE. PROVIDER NOT DETECTED.", "error");
       return;
     }
 
@@ -319,7 +319,7 @@ export default function App() {
         signatureBytes = signed.signature;
       }catch(signErr){
         setStatus("SIGNATURE DENIED");
-        showToast("Signature request denied. Please approve to vote.", "error");
+        showToast("AUTHENTICATION REJECTED. SIGNAL UNSIGNED.", "error");
         return;
       }
 
@@ -366,46 +366,46 @@ export default function App() {
           setStatus("INPUT LOCKED");
           if(j?.stanceCounts) setCounts(j.stanceCounts);
           if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
-          showToast("You have already voted this cycle.", "warning");
+          showToast("INPUT LOCKED: OBSERVATION ALREADY RECORDED.", "warning");
           return;
         }
         if(j?.error === "LOCKED" || j?.error === "CYCLE_EXPIRED"){
           setStatus("CYCLE CLOSED");
           setCycleLocked(true);
-          showToast("Cycle has closed. Wait for next transmission.", "error");
+          showToast("CYCLE TERMINATED. NEXT TRANSMISSION PENDING.", "error");
           return;
         }
         if(j?.error === "NOT_ELIGIBLE"){
           setStatus("NOT ELIGIBLE");
           const minBalance = j?.minRequired || 100000;
           const currentBalance = j?.balance || 0;
-          showToast(`Insufficient token balance. Need ${minBalance.toLocaleString()} $KAIRO, you have ${currentBalance.toLocaleString()}.`, "error");
+          showToast(`CIRCUIT ACCESS DENIED. THRESHOLD: ${minBalance.toLocaleString()} $KAIRO. DETECTED: ${currentBalance.toLocaleString()}.`, "error");
           return;
         }
         if(j?.error === "WALLET_FLAGGED"){
           setStatus("WALLET FLAGGED");
-          showToast("Your wallet has been flagged for suspicious activity.", "error");
+          showToast("ACTOR FLAGGED: ANOMALY PATTERN DETECTED.", "error");
           return;
         }
         if(j?.error === "WALLET_REQUIRED" || j?.error === "SIGNATURE_REQUIRED"){
           setStatus("WALLET REQUIRED");
-          showToast("Wallet signature required to vote.", "error");
+          showToast("AUTHENTICATION REQUIRED. SIGNAL SOURCE UNSIGNED.", "error");
           return;
         }
         if(j?.error === "INVALID_SIGNATURE" || j?.error === "INVALID_MESSAGE"){
           setStatus("SIGNATURE INVALID");
-          showToast("Invalid signature. Please try again.", "error");
+          showToast("SIGNAL INTEGRITY COMPROMISED. AUTHENTICATION FAILED.", "error");
           return;
         }
         if(j?.error === "RATE_LIMIT"){
           setStatus("RATE LIMIT EXCEEDED");
           const tier = j?.tier || "new";
           const limit = j?.limit || 3;
-          showToast(`Rate limit exceeded. ${tier} tier allows ${limit} requests per minute.`, "error");
+          showToast(`CONGESTION THRESHOLD EXCEEDED. TIER: ${tier.toUpperCase()}. CAPACITY: ${limit}/MIN.`, "error");
           return;
         }
         setStatus("ERROR: " + (j?.error || "UNKNOWN"));
-        showToast(`Error: ${j?.error || "Unknown error occurred"}`, "error");
+        showToast(`SYSTEM FAULT: ${j?.error || "UNKNOWN"}`, "error");
         return;
       }
       setHasVoted(true);
@@ -413,11 +413,11 @@ export default function App() {
       if(j?.stanceCounts) setCounts(j.stanceCounts);
       if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
       setStatus("RECORDED");
-      showToast(`Vote recorded: ${next}`, "success");
+      showToast(`OBSERVATION LOGGED: ${next}`, "success");
     }catch(err){
       setStance(null);
       setStatus("ERROR: NETWORK");
-      showToast("Network error. Please check your connection and try again.", "error");
+      showToast("ROUTE DEGRADED. CONNECTION UNSTABLE.", "error");
     }
   };
 
