@@ -9,10 +9,21 @@ const nowUtc = () => {
 };
 
 const formatCountdown = (ms) => {
-  const total = Math.max(0, Math.floor(ms / 1000));
+  const totalMs = Math.max(0, ms);
+  const total = Math.floor(totalMs / 1000);
   const minutes = String(Math.floor(total / 60)).padStart(2,"0");
   const seconds = String(total % 60).padStart(2,"0");
-  return `${minutes}:${seconds}`;
+  const milliseconds = String(Math.floor((totalMs % 1000) / 10)).padStart(2,"0");
+  return `${minutes}:${seconds}.${milliseconds}`;
+};
+
+const getWinnerMessage = (option) => {
+  const messages = {
+    ALIGN: "Alignment proves fruitful",
+    REJECT: "Rejection bears reward",
+    WITHHOLD: "Withholding from action becomes action in itself"
+  };
+  return messages[option] || "";
 };
 
 const formatWallet = (addr) => {
@@ -59,6 +70,7 @@ export default function App() {
   const lastGlitchRef = useRef(0);
   const lastAtRef = useRef(null);
   const lastPulseAtRef = useRef(null);
+  const lastWinnerCycleRef = useRef(null);
   const audioAllowKey = "kairoAudioAllowed";
   const voteKey = "kairoVoteCycle";
 
@@ -229,7 +241,7 @@ export default function App() {
 
   useEffect(() => {
     if(!transmission?.cycleEndsAt){
-      setCountdown("05:00");
+      setCountdown("05:00.00");
       return;
     }
     const tick = () => {
@@ -237,9 +249,20 @@ export default function App() {
       setCountdown(formatCountdown(ms));
     };
     tick();
-    const t = window.setInterval(() => {tick();},1000);
+    const t = window.setInterval(() => {tick();},50);
     return () => {window.clearInterval(t);};
   },[transmission?.cycleEndsAt]);
+
+  useEffect(() => {
+    if(!transmission?.reward?.option) return;
+    if(!transmission?.cycleId) return;
+    if(lastWinnerCycleRef.current === transmission.cycleId) return;
+    lastWinnerCycleRef.current = transmission.cycleId;
+    const winnerMsg = getWinnerMessage(transmission.reward.option);
+    if(winnerMsg){
+      showToast(winnerMsg, "success");
+    }
+  },[transmission?.reward?.option, transmission?.cycleId]);
 
   useEffect(() => {
     // occasional ambient glitch

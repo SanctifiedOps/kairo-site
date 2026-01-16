@@ -3,10 +3,10 @@
   --panel:#0a0c0d;
   --text:#e7e3da;
   --muted:#a7a39a;
-  --accent:#ff2bd6;
+  --accent:#00ff88;
   --danger:#ff4d4d;
   --border:rgba(255,255,255,0.08);
-  --glow:rgba(255,43,214,0.12);
+  --glow:rgba(0,255,136,0.12);
   --shadow:0 10px 30px rgba(0,0,0,0.55);
   --radius:14px;
   --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;

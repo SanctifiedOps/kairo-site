@@ -1819,7 +1819,16 @@ const finalizeCycle = async (state) => {
   return reward;
 };
 
-const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
+const getWinnerMessage = (option) => {
+  const messages = {
+    ALIGN: "Alignment proves fruitful",
+    REJECT: "Rejection bears reward",
+    WITHHOLD: "Withholding from action becomes action in itself"
+  };
+  return messages[option] || "";
+};
+
+const postToTelegram = async ({transmission, cycleIndex, cycleId, winnerOption}) => {
   if(!TELEGRAM_POSTING_ENABLED){
     logger.debug("Telegram posting disabled");
     return;
@@ -1842,7 +1851,16 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
       return;
     }
 
-    const caption = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${transmission}\n\n#KAIRO #CYCLE${cycleIndex}`;
+    let caption = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${transmission}`;
+
+    if(winnerOption){
+      const winnerMsg = getWinnerMessage(winnerOption);
+      if(winnerMsg){
+        caption += `\n\n${winnerMsg}`;
+      }
+    }
+
+    caption += `\n\n#KAIRO #CYCLE${cycleIndex}`;
 
     await telegramBot.sendVideo(TELEGRAM_CHANNEL_ID, videoSource, {caption});
 
@@ -1858,7 +1876,8 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
 
 const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   const prior = await getLatestState();
-  await finalizeCycle(prior);
+  const priorReward = await finalizeCycle(prior);
+  const priorWinnerOption = priorReward?.option || null;
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
   const cycleIndex = prior ? (prior.cycleIndex || 0) + 1 : 0;
@@ -1944,7 +1963,8 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   await postToTelegram({
     transmission,
     cycleIndex,
-    cycleId
+    cycleId,
+    winnerOption:priorWinnerOption
   });
 
   return latest;
@@ -2077,7 +2097,8 @@ app.get("/api/last", async (req,res) => {
       doctrineVersion:state.doctrineVersion || getDoctrineVersion(),
       locked,
       stanceCounts:state.stanceCounts || defaultCounts(),
-      cycleEndsAt:state.cycleEndsAt || null
+      cycleEndsAt:state.cycleEndsAt || null,
+      reward:state.reward || null
     });
   }catch(err){
     res.status(500).json({error:"INTERNAL"});
