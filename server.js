@@ -1816,6 +1816,14 @@ const finalizeCycle = async (state) => {
     at:nowIso(),
     payload:{option, winnerCount:winners.length, counts}
   });
+
+  // Post winner announcement to Telegram
+  await postWinnerToTelegram({
+    winnerOption:option,
+    cycleIndex:state.cycleIndex || 0,
+    cycleId:state.cycleId
+  });
+
   return reward;
 };
 
@@ -1828,7 +1836,7 @@ const getWinnerMessage = (option) => {
   return messages[option] || "";
 };
 
-const postToTelegram = async ({transmission, cycleIndex, cycleId, winnerOption}) => {
+const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
   if(!TELEGRAM_POSTING_ENABLED){
     logger.debug("Telegram posting disabled");
     return;
@@ -1851,16 +1859,7 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId, winnerOption})
       return;
     }
 
-    let caption = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${transmission}`;
-
-    if(winnerOption){
-      const winnerMsg = getWinnerMessage(winnerOption);
-      if(winnerMsg){
-        caption += `\n\n${winnerMsg}`;
-      }
-    }
-
-    caption += `\n\n#KAIRO #CYCLE${cycleIndex}`;
+    const caption = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${transmission}\n\n#KAIRO #CYCLE${cycleIndex}`;
 
     await telegramBot.sendVideo(TELEGRAM_CHANNEL_ID, videoSource, {caption});
 
@@ -1874,10 +1873,44 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId, winnerOption})
   }
 };
 
+const postWinnerToTelegram = async ({winnerOption, cycleIndex, cycleId}) => {
+  if(!TELEGRAM_POSTING_ENABLED){
+    logger.debug("Telegram posting disabled");
+    return;
+  }
+  if(!telegramBot || !TELEGRAM_CHANNEL_ID){
+    logger.warn("Telegram not configured for winner announcement", {
+      hasToken:Boolean(TELEGRAM_BOT_TOKEN),
+      channelId:TELEGRAM_CHANNEL_ID
+    });
+    return;
+  }
+
+  try{
+    const winnerMsg = getWinnerMessage(winnerOption);
+    if(!winnerMsg){
+      logger.warn("No winner message for option", {option: winnerOption});
+      return;
+    }
+
+    const message = `${winnerMsg}\n\n#KAIRO #CYCLE${cycleIndex}`;
+
+    await telegramBot.sendMessage(TELEGRAM_CHANNEL_ID, message);
+
+    logger.info("Posted winner to Telegram", {cycleId, cycleIndex, option: winnerOption, channelId: TELEGRAM_CHANNEL_ID});
+  }catch(err){
+    logger.error("Failed to post winner to Telegram", {
+      error: err.message,
+      cycleId,
+      option: winnerOption,
+      channelId: TELEGRAM_CHANNEL_ID
+    });
+  }
+};
+
 const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   const prior = await getLatestState();
-  const priorReward = await finalizeCycle(prior);
-  const priorWinnerOption = priorReward?.option || null;
+  await finalizeCycle(prior);
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
   const cycleIndex = prior ? (prior.cycleIndex || 0) + 1 : 0;
@@ -1963,8 +1996,7 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   await postToTelegram({
     transmission,
     cycleIndex,
-    cycleId,
-    winnerOption:priorWinnerOption
+    cycleId
   });
 
   return latest;
