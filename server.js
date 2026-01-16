@@ -39,6 +39,7 @@ const REPEAT_THRESHOLD = Number(process.env.REPEAT_THRESHOLD || 0.22);
 const WINNERS_PER_CYCLE = Number(process.env.WINNERS_PER_CYCLE || 5);
 const CYCLE_INTERVAL_MINUTES = Number(process.env.CYCLE_INTERVAL_MINUTES || 5);
 const CYCLE_LOCK_TTL_MS = Number(process.env.CYCLE_LOCK_TTL_MS || 120000);
+const CYCLE_RESET_VERSION = process.env.CYCLE_RESET_VERSION || "";
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 6);
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.HELIUS_RPC_URL || "";
@@ -211,6 +212,26 @@ const completeCycleLock = async (windowId, cycleId) => {
     }, {merge:true});
   }catch(err){
     logger.warn("Failed to complete cycle lock", {windowId, error:err.message});
+  }
+};
+
+const resetCycleStateIfNeeded = async () => {
+  if(!db || !CYCLE_RESET_VERSION) return false;
+  const resetRef = db.collection("config").doc("cycleReset");
+  try{
+    const snap = await resetRef.get();
+    if(snap.exists && snap.data()?.version === CYCLE_RESET_VERSION) return false;
+    await db.runTransaction(async (t) => {
+      const current = await t.get(resetRef);
+      if(current.exists && current.data()?.version === CYCLE_RESET_VERSION) return;
+      t.set(resetRef, {version:CYCLE_RESET_VERSION, at:nowIso()}, {merge:true});
+      t.delete(db.collection("state").doc("latest"));
+    });
+    inMem.state = null;
+    return true;
+  }catch(err){
+    logger.warn("Failed to reset cycle state", {error:err.message});
+    return false;
   }
 };
 
@@ -1840,7 +1861,7 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   await finalizeCycle(prior);
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
-  const cycleIndex = (prior?.cycleIndex || 0) + 1;
+  const cycleIndex = prior ? (prior.cycleIndex || 0) + 1 : 0;
   const window = cycleWindow || getCycleWindow();
   const cycleId = `c_${window.startsAtMs.toString(36)}_${randomUUID().slice(0,8)}`;
   const at = window.startsAt;
@@ -1933,6 +1954,7 @@ initFirebase();
 
 const maybeRotateCycle = async () => {
   const currentWindow = getCycleWindow();
+  await resetCycleStateIfNeeded();
   const state = await getLatestState();
 
   if(!state){

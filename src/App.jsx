@@ -674,36 +674,28 @@ export default function App() {
         <div className="footRight">
           <button
             type="button"
-            className="copyButton"
+            className="pillButton copyButton"
             onClick={() => {playButtonSound(); copyCA();}}
             aria-label="Copy contract address"
           >
             COPY CA
           </button>
-          <div className="footLinks">
-            <div className="footLinkItem">
-              <span className="footLinkLabel">Telegram:</span>
-              <a
-                className="footLink"
-                href="https://t.me/kairoresidual"
-                target="_blank"
-                rel="noreferrer"
-              >
-                t.me/kairoresidual
-              </a>
-            </div>
-            <div className="footLinkItem">
-              <span className="footLinkLabel">Follow on X:</span>
-              <a
-                className="footLink"
-                href="https://x.com/kairoresidual"
-                target="_blank"
-                rel="noreferrer"
-              >
-                x.com/kairoresidual
-              </a>
-            </div>
-          </div>
+          <a
+            className="pillButton"
+            href="https://t.me/kairoresidual"
+            target="_blank"
+            rel="noreferrer"
+          >
+            TELEGRAM
+          </a>
+          <a
+            className="pillButton"
+            href="https://x.com/kairoresidual"
+            target="_blank"
+            rel="noreferrer"
+          >
+            FOLLOW ON X
+          </a>
         </div>
       </footer>
 

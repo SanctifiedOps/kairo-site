@@ -330,37 +330,9 @@
 .footRight{
   justify-self:end;
   display:flex;
-  flex-direction:column;
-  align-items:flex-end;
-  gap:8px;
-}
-
-.footLinks{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  font-size:10px;
-  letter-spacing:0.06em;
-  text-align:right;
-}
-
-.footLinkItem{
-  display:flex;
+  flex-direction:row;
   align-items:center;
-  gap:6px;
-}
-
-.footLinkLabel{
-  color:var(--muted);
-}
-
-.footLink{
-  color:var(--accent);
-  text-decoration:none;
-}
-
-.footLink:hover{
-  text-decoration:underline;
+  gap:10px;
 }
 
 .footTime{
@@ -392,7 +364,12 @@
   outline-offset:2px;
 }
 
+.pillButton,
 .copyButton{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:140px;
   padding:6px 12px;
   border-radius:12px;
   border:1px solid rgba(255,255,255,0.14);
@@ -401,17 +378,28 @@
   font-family:var(--mono);
   letter-spacing:0.18em;
   font-size:10px;
+  text-decoration:none;
   cursor:pointer;
 }
 
+.pillButton:hover,
 .copyButton:hover{
   border-color:rgba(255,43,214,0.25);
   box-shadow:0 0 0 3px rgba(255,43,214,0.05);
 }
 
+.pillButton:focus-visible,
 .copyButton:focus-visible{
   outline:2px solid var(--accent);
   outline-offset:2px;
+}
+
+@media (max-width:720px){
+  .pillButton,
+  .copyButton{
+    min-width:110px;
+    letter-spacing:0.14em;
+  }
 }
 
 @keyframes caretBlink{
