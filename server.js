@@ -45,6 +45,9 @@ const CREATOR_FEE_MIN_LAMPORTS = Number(process.env.CREATOR_FEE_MIN_LAMPORTS || 
 const MAX_SOL_TRANSFERS_PER_TX = Number(process.env.MAX_SOL_TRANSFERS_PER_TX || 8);
 const PUMPFUN_SDK_MODULE = process.env.PUMPFUN_SDK_MODULE || "";
 const PUMPFUN_SDK_FACTORY = process.env.PUMPFUN_SDK_FACTORY || "createPumpFunSdk";
+const TOKEN_MINT_ADDRESS = process.env.TOKEN_MINT_ADDRESS || "";
+const TOKEN_MIN_BALANCE = Number(process.env.TOKEN_MIN_BALANCE || 100000);
+const ENABLE_TOKEN_GATING = process.env.ENABLE_TOKEN_GATING === "true";
 
 const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
 const SYSTEM_AUDITOR = "You are AUDITOR: a verifier. You enforce constraints. You remove fluff. You prevent repetition and contradictions. You are harsh and concise.";
@@ -84,13 +87,94 @@ const inMem = {
 
 const rateStore = new Map();
 
+const logger = {
+  error: (msg, meta = {}) => console.error(`[ERROR] ${msg}`, JSON.stringify(meta)),
+  warn: (msg, meta = {}) => console.warn(`[WARN] ${msg}`, JSON.stringify(meta)),
+  info: (msg, meta = {}) => console.log(`[INFO] ${msg}`, JSON.stringify(meta)),
+  debug: (msg, meta = {}) => {
+    if(process.env.DEBUG) console.log(`[DEBUG] ${msg}`, JSON.stringify(meta));
+  }
+};
+
 const nowIso = () => new Date().toISOString();
+
+const alignToIntervalMs = (timestampMs, intervalMs) => {
+  return Math.floor(timestampMs / intervalMs) * intervalMs;
+};
+
+const getCycleWindow = (timestampMs = Date.now()) => {
+  const intervalMs = CYCLE_INTERVAL_MINUTES * 60 * 1000;
+  const startsAtMs = alignToIntervalMs(timestampMs, intervalMs);
+  const endsAtMs = startsAtMs + intervalMs;
+  return {
+    startsAt:new Date(startsAtMs).toISOString(),
+    endsAt:new Date(endsAtMs).toISOString(),
+    startsAtMs,
+    endsAtMs,
+    windowId:`w_${startsAtMs.toString(36)}`
+  };
+};
 
 const defaultCounts = () => ({ALIGN:0,REJECT:0,WITHHOLD:0});
 
 const sanitizeActorId = (raw, req) => {
   const base = (raw || req.ip || "anon").toString().slice(0,64);
   return base.replace(/[^a-zA-Z0-9_-]/g,"_");
+};
+
+const verifyWalletSignature = ({wallet, message, signature}) => {
+  try{
+    if(!wallet || !message || !signature) return false;
+    const walletPubkey = new PublicKey(wallet);
+    const messageBytes = new TextEncoder().encode(message);
+    const signatureBytes = bs58.decode(signature);
+    const verified = walletPubkey.verify(messageBytes, signatureBytes);
+    return verified;
+  }catch(err){
+    logger.error("Signature verification failed", {error:err.message, wallet});
+    return false;
+  }
+};
+
+const buildVoteMessage = ({cycleId, stance, endsAt}) => {
+  return `KAIRO VOTE\ncycleId: ${cycleId}\nstance: ${stance}\nexpires: ${endsAt}`;
+};
+
+const getTokenBalance = async (wallet) => {
+  if(!TOKEN_MINT_ADDRESS || !SOLANA_RPC_URL) return 0;
+  try{
+    const connection = getSolanaConnection();
+    if(!connection) return 0;
+    const walletPubkey = new PublicKey(wallet);
+    const mintPubkey = new PublicKey(TOKEN_MINT_ADDRESS);
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
+      mint:mintPubkey
+    });
+    if(tokenAccounts.value.length === 0) return 0;
+    const balance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount;
+    return balance || 0;
+  }catch(err){
+    logger.error("Failed to fetch token balance", {wallet, error:err.message});
+    return 0;
+  }
+};
+
+const isEligibleToVote = async (wallet) => {
+  if(!ENABLE_TOKEN_GATING){
+    return {eligible:true, reason:"token_gating_disabled"};
+  }
+  if(!TOKEN_MINT_ADDRESS){
+    logger.warn("Token gating enabled but no mint address configured");
+    return {eligible:true, reason:"no_token_configured"};
+  }
+  const balance = await getTokenBalance(wallet);
+  const eligible = balance >= TOKEN_MIN_BALANCE;
+  return {
+    eligible,
+    balance,
+    minRequired:TOKEN_MIN_BALANCE,
+    reason:eligible ? "sufficient_balance" : "insufficient_balance"
+  };
 };
 
 const rateLimited = (key) => {
@@ -516,25 +600,34 @@ const slugify = (text) => (
     .replace(/^_+|_+$/g, "")
 );
 
-const loadTopicsConfig = () => {
+let topicsConfigCache = null;
+let seedConceptsConfigCache = null;
+
+const loadTopicsConfig = (forceReload = false) => {
+  if(topicsConfigCache && !forceReload) return topicsConfigCache;
+  let result;
   try{
     const raw = fs.readFileSync(TOPICS_CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw);
     const entries = Array.isArray(parsed?.topics) ? parsed.topics : [];
     const normalized = entries.map(normalizeTopicEntry).filter(Boolean);
     if(normalized.length){
-      return {topics:normalized, version:parsed?.version || null};
+      result = {topics:normalized, version:parsed?.version || null};
     }
   }catch(err){
-    // fall through to defaults
+    logger.debug("Topics config load failed, using defaults", {error:err.message});
   }
-  const fallback = DEFAULT_TOPICS.map((topic) => ({
-    id:topic.key,
-    label:topic.key,
-    category:topic.category,
-    tags:[]
-  }));
-  return {topics:fallback, version:null};
+  if(!result){
+    const fallback = DEFAULT_TOPICS.map((topic) => ({
+      id:topic.key,
+      label:topic.key,
+      category:topic.category,
+      tags:[]
+    }));
+    result = {topics:fallback, version:null};
+  }
+  topicsConfigCache = result;
+  return result;
 };
 
 const normalizeSeedEntry = (entry) => {
@@ -549,24 +642,30 @@ const normalizeSeedEntry = (entry) => {
   return {id:safeId,label:label || safeId,tags};
 };
 
-const loadSeedConceptsConfig = () => {
+const loadSeedConceptsConfig = (forceReload = false) => {
+  if(seedConceptsConfigCache && !forceReload) return seedConceptsConfigCache;
+  let result;
   try{
     const raw = fs.readFileSync(SEED_CONCEPTS_CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw);
     const entries = Array.isArray(parsed?.seedConcepts) ? parsed.seedConcepts : [];
     const normalized = entries.map(normalizeSeedEntry).filter(Boolean);
     if(normalized.length){
-      return {seedConcepts:normalized, version:parsed?.version || null};
+      result = {seedConcepts:normalized, version:parsed?.version || null};
     }
   }catch(err){
-    // fall through to defaults
+    logger.debug("Seed concepts config load failed, using defaults", {error:err.message});
   }
-  const fallback = DEFAULT_SEED_CONCEPTS.map((label) => ({
-    id:slugify(label),
-    label,
-    tags:[]
-  }));
-  return {seedConcepts:fallback, version:null};
+  if(!result){
+    const fallback = DEFAULT_SEED_CONCEPTS.map((label) => ({
+      id:slugify(label),
+      label,
+      tags:[]
+    }));
+    result = {seedConcepts:fallback, version:null};
+  }
+  seedConceptsConfigCache = result;
+  return result;
 };
 
 const loadBags = async () => {
@@ -813,17 +912,21 @@ const parseAuditApprove = (text) => {
   }
 };
 
-const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSummary}) => {
+const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSummary, priorContext}) => {
   const topicLine = topicCategory ? `${topicLabel} (${topicCategory})` : topicLabel;
   const doctrineBlock = buildDoctrineBlock();
-  return [
+  const parts = [
     `TOPIC: ${topicLine}`,
     `SEED: ${seedConcept}`,
-    `LAST SUMMARY: ${lastSummary || "NONE"}`,
-    doctrineBlock,
-    "Constraint: The doctrine is canonical. Do not contradict it.",
-    "Instruction: Draft 4-6 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD)."
-  ].join("\n");
+    `LAST SUMMARY: ${lastSummary || "NONE"}`
+  ];
+  if(priorContext && priorContext.length > 20){
+    parts.push(`PRIOR CONTEXT: ${priorContext}`);
+  }
+  parts.push(doctrineBlock);
+  parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
+  parts.push("Instruction: Draft 4-6 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
+  return parts.join("\n");
 };
 
 const buildAuditorCritiquePrompt = ({draft, recentSummaries, recentTopics}) => {
@@ -901,7 +1004,8 @@ const generateTransmission = async ({priorMemory}) => {
     topicLabel:seedPack.topicLabel || (seedPack.topics[0] ? topicLabelMap.get(seedPack.topics[0]) : "UNKNOWN"),
     topicCategory:seedPack.topicCategory || null,
     seedConcept:seedPack.seedConcept,
-    lastSummary
+    lastSummary,
+    priorContext:priorMemory
   });
   let draft = await getOpusText({
     system:buildOpusSystem(),
@@ -1274,6 +1378,31 @@ const setCycleReward = async (cycleId, reward) => {
   }
 };
 
+const selectWeightedRandomOption = (counts) => {
+  const entries = ["ALIGN","REJECT","WITHHOLD"].map((k) => ({key:k, count:counts[k] || 0}));
+  const total = entries.reduce((sum, e) => sum + e.count, 0);
+  if(total === 0){
+    const fallback = entries[Math.floor(Math.random() * entries.length)].key;
+    logger.info("No votes, selecting random fallback", {option:fallback});
+    return fallback;
+  }
+  const rand = Math.random() * total;
+  let cumulative = 0;
+  for(const entry of entries){
+    cumulative += entry.count;
+    if(rand < cumulative){
+      logger.info("Selected weighted option", {
+        option:entry.key,
+        count:entry.count,
+        total,
+        probability:(entry.count / total * 100).toFixed(1) + "%"
+      });
+      return entry.key;
+    }
+  }
+  return entries[entries.length - 1].key;
+};
+
 const finalizeCycle = async (state) => {
   if(!state?.cycleId) return null;
   const existing = await getCycleDoc(state.cycleId);
@@ -1282,20 +1411,20 @@ const finalizeCycle = async (state) => {
     return null;
   }
   const counts = state.stanceCounts || defaultCounts();
-  const entries = ["ALIGN","REJECT","WITHHOLD"].map((k) => ({key:k, count:counts[k] || 0}));
-  const max = Math.max(...entries.map((e) => e.count));
-  if(max <= 0) return null;
-  const leaders = entries.filter((e) => e.count === max).map((e) => e.key);
-  const option = leaders[Math.floor(Math.random() * leaders.length)];
+  const option = selectWeightedRandomOption(counts);
   const actors = await fetchStancesByOption(state.cycleId, option);
-  if(actors.length === 0) return null;
+  if(actors.length === 0){
+    logger.warn("No actors found for winning option", {cycleId:state.cycleId, option});
+    return null;
+  }
   const winners = pickRandomGroup(actors, Math.min(WINNERS_PER_CYCLE, actors.length));
   const reward = {
     option,
     winners,
     poolPercent:50,
     at:nowIso(),
-    finalized:true
+    finalized:true,
+    voteCounts:counts
   };
   await setCycleReward(state.cycleId, reward);
   await distributeCreatorFees({cycleId:state.cycleId, reward});
@@ -1304,7 +1433,7 @@ const finalizeCycle = async (state) => {
     cycleId:state.cycleId,
     actorId:null,
     at:nowIso(),
-    payload:{option, winnerCount:winners.length}
+    payload:{option, winnerCount:winners.length, counts}
   });
   return reward;
 };
@@ -1315,8 +1444,10 @@ const generateCycle = async ({seed, createdBy}) => {
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
   const cycleIndex = (prior?.cycleIndex || 0) + 1;
-  const cycleId = `c_${Date.now().toString(36)}_${randomUUID().slice(0,8)}`;
-  const at = nowIso();
+  const window = getCycleWindow();
+  const cycleId = `c_${window.startsAtMs.toString(36)}_${randomUUID().slice(0,8)}`;
+  const at = window.startsAt;
+  const cycleEndsAt = window.endsAt;
   const result = await generateTransmission({priorMemory});
   const transmission = result.transmission;
   const primary = transmission;
@@ -1325,11 +1456,8 @@ const generateCycle = async ({seed, createdBy}) => {
   const deliberation = Array.isArray(result.deliberation) ? result.deliberation : [];
   const deliberationText = deliberation.map((entry) => entry.text).join(" / ");
   const memory = buildMemory(priorMemory, transmission, deliberationText);
-  const integrity = result.integrity || computeIntegrity(prior?.stanceCounts || defaultCounts());
+  const integrity = result.integrity || "LOW";
   const doctrineVersion = getDoctrineVersion();
-  const cycleEndsAt = CYCLE_INTERVAL_MINUTES > 0
-    ? new Date(Date.now() + CYCLE_INTERVAL_MINUTES * 60 * 1000).toISOString()
-    : null;
 
   const latest = {
     cycleId,
@@ -1400,13 +1528,30 @@ const generateCycle = async ({seed, createdBy}) => {
 initFirebase();
 
 const maybeRotateCycle = async () => {
+  const currentWindow = getCycleWindow();
   const state = await getLatestState();
+
   if(!state){
+    logger.info("No state found, generating boot cycle");
     return generateCycle({seed:null, createdBy:"boot"});
   }
-  if(isLocked(state)){
+
+  const stateWindowMs = state.at ? Date.parse(state.at) : 0;
+  const stateWindow = getCycleWindow(stateWindowMs);
+
+  if(stateWindow.windowId !== currentWindow.windowId){
+    logger.info("Window changed, generating new cycle", {
+      oldWindow:stateWindow.windowId,
+      newWindow:currentWindow.windowId
+    });
     return generateCycle({seed:null, createdBy:"auto"});
   }
+
+  if(isLocked(state)){
+    logger.warn("Cycle locked but in same window", {cycleId:state.cycleId});
+    return generateCycle({seed:null, createdBy:"auto"});
+  }
+
   return state;
 };
 
@@ -1490,12 +1635,36 @@ app.post("/api/stance", async (req,res) => {
     return res.status(400).json({error:"INVALID_STANCE"});
   }
 
-  if(!req.body?.actorId){
+  const wallet = req.body?.wallet || req.body?.actorId;
+  if(!wallet){
     return res.status(401).json({error:"WALLET_REQUIRED"});
   }
 
-  const actorId = sanitizeActorId(req.body?.actorId, req);
-  const rateKey = `${actorId}:${req.ip}`;
+  const message = req.body?.message;
+  const signature = req.body?.signature;
+  if(!message || !signature){
+    return res.status(401).json({error:"SIGNATURE_REQUIRED"});
+  }
+
+  const verified = verifyWalletSignature({wallet, message, signature});
+  if(!verified){
+    logger.warn("Invalid signature", {wallet, stance});
+    return res.status(401).json({error:"INVALID_SIGNATURE"});
+  }
+
+  const eligibility = await isEligibleToVote(wallet);
+  if(!eligibility.eligible){
+    logger.warn("Wallet not eligible to vote", {wallet, ...eligibility});
+    return res.status(403).json({
+      error:"NOT_ELIGIBLE",
+      reason:eligibility.reason,
+      balance:eligibility.balance,
+      minRequired:eligibility.minRequired
+    });
+  }
+
+  const actorId = sanitizeActorId(wallet, req);
+  const rateKey = `${actorId}`;
   if(rateLimited(rateKey)){
     return res.status(429).json({error:"RATE_LIMIT"});
   }
@@ -1506,6 +1675,23 @@ app.post("/api/stance", async (req,res) => {
   }
   if(isLocked(state)){
     return res.status(409).json({error:"LOCKED"});
+  }
+
+  const expectedMessage = buildVoteMessage({
+    cycleId:state.cycleId,
+    stance,
+    endsAt:state.cycleEndsAt || ""
+  });
+  if(message !== expectedMessage){
+    logger.warn("Message mismatch", {wallet, expected:expectedMessage, received:message});
+    return res.status(401).json({error:"INVALID_MESSAGE"});
+  }
+
+  if(state.cycleEndsAt){
+    const expiresMs = Date.parse(state.cycleEndsAt);
+    if(!Number.isNaN(expiresMs) && Date.now() > expiresMs){
+      return res.status(409).json({error:"CYCLE_EXPIRED"});
+    }
   }
 
   const cycleId = state.cycleId;
@@ -1582,6 +1768,109 @@ app.post("/api/admin/cycle", async (req,res) => {
     const cycle = await generateCycle({seed, createdBy:"admin"});
     res.json({ok:true,cycleId:cycle.cycleId});
   }catch(err){
+    res.status(500).json({error:"INTERNAL"});
+  }
+});
+
+app.get("/api/health", async (req,res) => {
+  const checks = {
+    timestamp:nowIso(),
+    version:PROJECT_VERSION,
+    services:{},
+    warnings:[]
+  };
+
+  const state = await getLatestState();
+  checks.services.database = db ? "firestore" : "in-memory";
+  checks.services.ai_primary = anthropic ? "anthropic" : openai ? "openai" : "none";
+  checks.services.ai_auditor = openai ? "openai" : "none";
+
+  if(!db){
+    checks.warnings.push("Using in-memory storage - data will be lost on restart");
+  }
+
+  if(!anthropic && !openai){
+    checks.warnings.push("No AI providers configured - transmissions cannot be generated");
+  }
+
+  const connection = getSolanaConnection();
+  checks.services.solana_rpc = connection ? "connected" : "not_configured";
+
+  if(ENABLE_TOKEN_GATING && !TOKEN_MINT_ADDRESS){
+    checks.warnings.push("Token gating enabled but no mint address configured");
+  }
+
+  checks.cycle = {
+    id:state?.cycleId || null,
+    index:state?.cycleIndex || 0,
+    locked:state ? isLocked(state) : false,
+    endsAt:state?.cycleEndsAt || null,
+    integrity:state?.integrity || null
+  };
+
+  const currentWindow = getCycleWindow();
+  if(state?.at){
+    const stateWindowMs = Date.parse(state.at);
+    const stateWindow = getCycleWindow(stateWindowMs);
+    if(stateWindow.windowId !== currentWindow.windowId){
+      checks.warnings.push("Cycle out of sync with current time window");
+    }
+  }
+
+  const isHealthy = checks.warnings.length === 0 &&
+                    checks.services.ai_primary !== "none" &&
+                    state?.cycleId;
+
+  res.status(isHealthy ? 200 : 503).json({
+    ok:isHealthy,
+    ...checks
+  });
+});
+
+app.get("/api/archive", async (req,res) => {
+  try{
+    const limit = Math.min(Number(req.query?.limit || 10), 50);
+    const cycles = [];
+
+    if(db){
+      const snap = await db.collection("cycles")
+        .orderBy("cycleIndex", "desc")
+        .limit(limit)
+        .get();
+      snap.forEach((doc) => {
+        const data = doc.data();
+        cycles.push({
+          cycleId:data.cycleId,
+          cycleIndex:data.cycleIndex,
+          at:data.at,
+          transmission:data.transmission || data.primary,
+          trace:data.trace,
+          integrity:data.integrity,
+          topics:data.topics,
+          seedConcept:data.seedConcept
+        });
+      });
+    }else{
+      const sorted = Array.from(inMem.cycles.values())
+        .sort((a, b) => (b.cycleIndex || 0) - (a.cycleIndex || 0))
+        .slice(0, limit);
+      sorted.forEach((data) => {
+        cycles.push({
+          cycleId:data.cycleId,
+          cycleIndex:data.cycleIndex,
+          at:data.at,
+          transmission:data.transmission || data.primary,
+          trace:data.trace,
+          integrity:data.integrity,
+          topics:data.topics,
+          seedConcept:data.seedConcept
+        });
+      });
+    }
+
+    res.json({ok:true, cycles});
+  }catch(err){
+    logger.error("Archive fetch failed", {error:err.message});
     res.status(500).json({error:"INTERNAL"});
   }
 });

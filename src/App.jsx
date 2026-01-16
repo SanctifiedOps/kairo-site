@@ -283,43 +283,102 @@ export default function App() {
       setStatus("WALLET REQUIRED");
       return;
     }
-    setStance(next);
-    setHasVoted(true);
-    setStatus("OBSERVATION RECORDED");
-    triggerGlitch();
+
+    const provider = walletProvider || getProvider();
+    if(!provider){
+      setStatus("WALLET NOT FOUND");
+      return;
+    }
+
+    setStatus("SIGNING...");
 
     try{
+      const cycleId = transmission?.cycleId;
+      const endsAt = transmission?.cycleEndsAt || "";
+      const message = `KAIRO VOTE\ncycleId: ${cycleId}\nstance: ${next}\nexpires: ${endsAt}`;
+      const messageBytes = new TextEncoder().encode(message);
+
+      let signatureBytes;
+      try{
+        const signed = await provider.signMessage(messageBytes, "utf8");
+        signatureBytes = signed.signature;
+      }catch(signErr){
+        setStatus("SIGNATURE DENIED");
+        return;
+      }
+
+      const bs58Encode = (bytes) => {
+        const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        const digits = [0];
+        for(let i = 0; i < bytes.length; i += 1){
+          let carry = bytes[i];
+          for(let j = 0; j < digits.length; j += 1){
+            carry += digits[j] << 8;
+            digits[j] = carry % 58;
+            carry = (carry / 58) | 0;
+          }
+          while(carry > 0){
+            digits.push(carry % 58);
+            carry = (carry / 58) | 0;
+          }
+        }
+        for(let i = 0; i < bytes.length && bytes[i] === 0; i += 1) digits.push(0);
+        return digits.reverse().map(d => ALPHABET[d]).join('');
+      };
+      const signature = bs58Encode(signatureBytes);
+
+      setStance(next);
+      setStatus("OBSERVATION RECORDED");
+      triggerGlitch();
+
       const r = await fetch("/api/stance",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({stance:next,actorId:wallet,at:new Date().toISOString()})
+        body:JSON.stringify({
+          stance:next,
+          wallet,
+          message,
+          signature,
+          at:new Date().toISOString()
+        })
       });
       const j = await r.json();
       if(!r.ok){
+        setStance(null);
         if(j?.error === "ALREADY_VOTED"){
+          setHasVoted(true);
           setStatus("INPUT LOCKED");
           if(j?.stanceCounts) setCounts(j.stanceCounts);
           if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
           return;
         }
-        if(j?.error === "LOCKED"){
+        if(j?.error === "LOCKED" || j?.error === "CYCLE_EXPIRED"){
           setStatus("CYCLE CLOSED");
           setCycleLocked(true);
           return;
         }
-        if(j?.error === "WALLET_REQUIRED"){
+        if(j?.error === "WALLET_REQUIRED" || j?.error === "SIGNATURE_REQUIRED"){
           setStatus("WALLET REQUIRED");
-          setHasVoted(false);
           return;
         }
-        throw new Error("bad_status");
+        if(j?.error === "INVALID_SIGNATURE" || j?.error === "INVALID_MESSAGE"){
+          setStatus("SIGNATURE INVALID");
+          return;
+        }
+        if(j?.error === "RATE_LIMIT"){
+          setStatus("RATE LIMIT EXCEEDED");
+          return;
+        }
+        setStatus("ERROR: " + (j?.error || "UNKNOWN"));
+        return;
       }
+      setHasVoted(true);
       if(j?.stanceCounts) setCounts(j.stanceCounts);
       if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
       setStatus("RECORDED");
     }catch(err){
-      // still keep the recorded feel, but degrade status subtly
-      setStatus("RECORDED (DEGRADED)");
+      setStance(null);
+      setStatus("ERROR: NETWORK");
     }
   };
 
