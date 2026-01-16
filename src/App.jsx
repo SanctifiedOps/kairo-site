@@ -51,6 +51,7 @@ export default function App() {
   const [loadingLines,setLoadingLines] = useState([]);
   const [typedTransmission,setTypedTransmission] = useState("");
   const [showConsensus,setShowConsensus] = useState(true);
+  const [toasts,setToasts] = useState([]);
   const audioRef = useRef(null);
   const buttonSoundRef = useRef(null);
   const timersRef = useRef([]);
@@ -61,6 +62,16 @@ export default function App() {
 
   const tagline = "EVERYTHING YOU SEE IS RESIDUAL";
   const caValue = "CA: PENDING";
+
+  const showToast = (message, type = "info") => {
+    const id = Date.now();
+    const toast = {id, message, type};
+    setToasts(prev => [...prev, toast]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
+
   const triggerGlitch = () => {
     const now = Date.now();
     if(now - lastGlitchRef.current < 1500) return;
@@ -273,20 +284,24 @@ export default function App() {
   const submitStance = async (next) => {
     if(cycleLocked){
       setStatus("CYCLE CLOSED");
+      showToast("Cycle is closed. Voting is locked.", "error");
       return;
     }
     if(hasVoted){
       setStatus("INPUT LOCKED");
+      showToast("You have already voted this cycle.", "warning");
       return;
     }
     if(!wallet){
       setStatus("WALLET REQUIRED");
+      showToast("Connect your wallet to vote.", "warning");
       return;
     }
 
     const provider = walletProvider || getProvider();
     if(!provider){
       setStatus("WALLET NOT FOUND");
+      showToast("Wallet provider not found. Install Phantom or Solflare.", "error");
       return;
     }
 
@@ -304,6 +319,7 @@ export default function App() {
         signatureBytes = signed.signature;
       }catch(signErr){
         setStatus("SIGNATURE DENIED");
+        showToast("Signature request denied. Please approve to vote.", "error");
         return;
       }
 
@@ -350,35 +366,58 @@ export default function App() {
           setStatus("INPUT LOCKED");
           if(j?.stanceCounts) setCounts(j.stanceCounts);
           if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
+          showToast("You have already voted this cycle.", "warning");
           return;
         }
         if(j?.error === "LOCKED" || j?.error === "CYCLE_EXPIRED"){
           setStatus("CYCLE CLOSED");
           setCycleLocked(true);
+          showToast("Cycle has closed. Wait for next transmission.", "error");
+          return;
+        }
+        if(j?.error === "NOT_ELIGIBLE"){
+          setStatus("NOT ELIGIBLE");
+          const minBalance = j?.minRequired || 100000;
+          const currentBalance = j?.balance || 0;
+          showToast(`Insufficient token balance. Need ${minBalance.toLocaleString()} $KAIRO, you have ${currentBalance.toLocaleString()}.`, "error");
+          return;
+        }
+        if(j?.error === "WALLET_FLAGGED"){
+          setStatus("WALLET FLAGGED");
+          showToast("Your wallet has been flagged for suspicious activity.", "error");
           return;
         }
         if(j?.error === "WALLET_REQUIRED" || j?.error === "SIGNATURE_REQUIRED"){
           setStatus("WALLET REQUIRED");
+          showToast("Wallet signature required to vote.", "error");
           return;
         }
         if(j?.error === "INVALID_SIGNATURE" || j?.error === "INVALID_MESSAGE"){
           setStatus("SIGNATURE INVALID");
+          showToast("Invalid signature. Please try again.", "error");
           return;
         }
         if(j?.error === "RATE_LIMIT"){
           setStatus("RATE LIMIT EXCEEDED");
+          const tier = j?.tier || "new";
+          const limit = j?.limit || 3;
+          showToast(`Rate limit exceeded. ${tier} tier allows ${limit} requests per minute.`, "error");
           return;
         }
         setStatus("ERROR: " + (j?.error || "UNKNOWN"));
+        showToast(`Error: ${j?.error || "Unknown error occurred"}`, "error");
         return;
       }
       setHasVoted(true);
+      setStance(next);
       if(j?.stanceCounts) setCounts(j.stanceCounts);
       if(j?.cycleId) window.localStorage.setItem(voteKey, j.cycleId);
       setStatus("RECORDED");
+      showToast(`Vote recorded: ${next}`, "success");
     }catch(err){
       setStance(null);
       setStatus("ERROR: NETWORK");
+      showToast("Network error. Please check your connection and try again.", "error");
     }
   };
 
@@ -593,6 +632,14 @@ export default function App() {
           </button>
         </div>
       </footer>
+
+      <div className="toastContainer" aria-live="polite" aria-atomic="true">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast toast-${toast.type}`}>
+            <div className="toastMessage">{toast.message}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
