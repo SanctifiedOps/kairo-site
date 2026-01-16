@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": ".",
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  "include": ["server.ts", "netlify/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src", "**/*.test.ts", "**/*.spec.ts"]
+}

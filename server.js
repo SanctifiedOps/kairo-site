@@ -72,6 +72,11 @@ const inMem = {
   state:null,
   cycles:new Map(),
   stances:new Map(),
+  reputation:{},
+  anomalyDetection:{
+    patterns:new Map(),
+    flaggedWallets:new Set()
+  },
   bags:{
     topicsBag:[],
     seedBag:[],
@@ -175,6 +180,267 @@ const isEligibleToVote = async (wallet) => {
     minRequired:TOKEN_MIN_BALANCE,
     reason:eligible ? "sufficient_balance" : "insufficient_balance"
   };
+};
+
+const getWalletReputation = async (wallet) => {
+  try{
+    if(db){
+      const reputationDoc = await db.collection("walletReputation").doc(wallet).get();
+      if(reputationDoc.exists){
+        const data = reputationDoc.data();
+        return {
+          wallet,
+          firstSeen:data.firstSeen || nowIso(),
+          lastSeen:data.lastSeen || nowIso(),
+          totalVotes:data.totalVotes || 0,
+          consecutiveDays:data.consecutiveDays || 0,
+          reputationScore:data.reputationScore || 0,
+          flagged:data.flagged || false,
+          flags:data.flags || []
+        };
+      }
+    }else{
+      if(inMem.reputation && inMem.reputation[wallet]){
+        return inMem.reputation[wallet];
+      }
+    }
+    return {
+      wallet,
+      firstSeen:nowIso(),
+      lastSeen:nowIso(),
+      totalVotes:0,
+      consecutiveDays:0,
+      reputationScore:0,
+      flagged:false,
+      flags:[]
+    };
+  }catch(err){
+    logger.error("Failed to fetch wallet reputation", {wallet, error:err.message});
+    return {wallet, firstSeen:nowIso(), lastSeen:nowIso(), totalVotes:0, consecutiveDays:0, reputationScore:0, flagged:false, flags:[]};
+  }
+};
+
+const updateWalletReputation = async (wallet) => {
+  try{
+    const rep = await getWalletReputation(wallet);
+    const now = nowIso();
+    const daysSinceFirst = rep.firstSeen ? Math.floor((Date.now() - Date.parse(rep.firstSeen)) / (1000 * 60 * 60 * 24)) : 0;
+    const reputationScore = Math.min(100, daysSinceFirst * 2 + rep.totalVotes * 0.5);
+
+    const updated = {
+      wallet,
+      firstSeen:rep.firstSeen || now,
+      lastSeen:now,
+      totalVotes:rep.totalVotes + 1,
+      consecutiveDays:rep.consecutiveDays,
+      reputationScore,
+      flagged:rep.flagged,
+      flags:rep.flags || []
+    };
+
+    if(db){
+      await db.collection("walletReputation").doc(wallet).set(updated, {merge:true});
+    }else{
+      if(!inMem.reputation) inMem.reputation = {};
+      inMem.reputation[wallet] = updated;
+    }
+
+    return updated;
+  }catch(err){
+    logger.error("Failed to update wallet reputation", {wallet, error:err.message});
+  }
+};
+
+const getProgressiveRateLimit = (reputationScore) => {
+  if(reputationScore >= 80) return {maxRequests:20, windowMs:60000, tier:"trusted"};
+  if(reputationScore >= 50) return {maxRequests:12, windowMs:60000, tier:"established"};
+  if(reputationScore >= 20) return {maxRequests:8, windowMs:60000, tier:"regular"};
+  return {maxRequests:3, windowMs:60000, tier:"new"};
+};
+
+const recordVotePattern = async ({wallet, cycleId, stance, timestamp}) => {
+  try{
+    const pattern = {
+      wallet,
+      cycleId,
+      stance,
+      timestamp: timestamp || nowIso(),
+      timestampMs: Date.now()
+    };
+
+    if(db){
+      await db.collection("votePatterns").add(pattern);
+    }else{
+      const key = `${cycleId}_${wallet}`;
+      inMem.anomalyDetection.patterns.set(key, pattern);
+    }
+  }catch(err){
+    logger.error("Failed to record vote pattern", {wallet, error:err.message});
+  }
+};
+
+const detectCoordinatedVoting = async (cycleId, windowMs = 30000) => {
+  try{
+    const now = Date.now();
+    const windowStart = now - windowMs;
+    let recentVotes = [];
+
+    if(db){
+      const snap = await db.collection("votePatterns")
+        .where("cycleId", "==", cycleId)
+        .where("timestampMs", ">", windowStart)
+        .get();
+      recentVotes = snap.docs.map(doc => doc.data());
+    }else{
+      const patterns = Array.from(inMem.anomalyDetection.patterns.values());
+      recentVotes = patterns.filter(p => p.cycleId === cycleId && p.timestampMs > windowStart);
+    }
+
+    if(recentVotes.length < 5) return {coordinated:false, count:0};
+
+    const stanceGroups = {};
+    recentVotes.forEach(vote => {
+      if(!stanceGroups[vote.stance]) stanceGroups[vote.stance] = [];
+      stanceGroups[vote.stance].push(vote);
+    });
+
+    for(const stance in stanceGroups){
+      const group = stanceGroups[stance];
+      if(group.length >= 5){
+        const timestamps = group.map(v => v.timestampMs).sort();
+        const firstTimestamp = timestamps[0];
+        const lastTimestamp = timestamps[timestamps.length - 1];
+        const spread = lastTimestamp - firstTimestamp;
+
+        if(spread < 10000){
+          logger.warn("Coordinated voting detected", {
+            cycleId,
+            stance,
+            count:group.length,
+            spreadMs:spread,
+            wallets:group.map(v => v.wallet)
+          });
+          return {coordinated:true, count:group.length, stance, wallets:group.map(v => v.wallet)};
+        }
+      }
+    }
+
+    return {coordinated:false, count:0};
+  }catch(err){
+    logger.error("Failed to detect coordinated voting", {cycleId, error:err.message});
+    return {coordinated:false, count:0};
+  }
+};
+
+const detectRapidVoting = async (wallet) => {
+  try{
+    const now = Date.now();
+    const windowStart = now - 300000;
+    let voteCount = 0;
+
+    if(db){
+      const snap = await db.collection("votePatterns")
+        .where("wallet", "==", wallet)
+        .where("timestampMs", ">", windowStart)
+        .get();
+      voteCount = snap.size;
+    }else{
+      const patterns = Array.from(inMem.anomalyDetection.patterns.values());
+      voteCount = patterns.filter(p => p.wallet === wallet && p.timestampMs > windowStart).length;
+    }
+
+    if(voteCount > 3){
+      logger.warn("Rapid voting detected", {wallet, voteCount, windowMs:300000});
+      return {rapid:true, voteCount};
+    }
+
+    return {rapid:false, voteCount:0};
+  }catch(err){
+    logger.error("Failed to detect rapid voting", {wallet, error:err.message});
+    return {rapid:false, voteCount:0};
+  }
+};
+
+const detectBotBehavior = async (wallet, cycleStartTimestamp) => {
+  try{
+    const pattern = inMem.anomalyDetection.patterns.get(`${wallet}_recent`);
+    if(!pattern) return {isBot:false, reason:null};
+
+    const voteTimestamp = Date.now();
+    const cycleStartMs = Date.parse(cycleStartTimestamp);
+    const timeSinceCycleStart = voteTimestamp - cycleStartMs;
+
+    if(timeSinceCycleStart < 5000){
+      logger.warn("Bot behavior detected: immediate voting", {wallet, timeSinceCycleStart});
+      return {isBot:true, reason:"immediate_voting", timeSinceCycleStart};
+    }
+
+    return {isBot:false, reason:null};
+  }catch(err){
+    logger.error("Failed to detect bot behavior", {wallet, error:err.message});
+    return {isBot:false, reason:null};
+  }
+};
+
+const flagWallet = async (wallet, reason) => {
+  try{
+    const reputation = await getWalletReputation(wallet);
+    const updatedFlags = [...(reputation.flags || []), {reason, at:nowIso()}];
+
+    if(db){
+      await db.collection("walletReputation").doc(wallet).set({
+        flagged:true,
+        flags:updatedFlags
+      }, {merge:true});
+    }else{
+      if(!inMem.reputation[wallet]) inMem.reputation[wallet] = reputation;
+      inMem.reputation[wallet].flagged = true;
+      inMem.reputation[wallet].flags = updatedFlags;
+      inMem.anomalyDetection.flaggedWallets.add(wallet);
+    }
+
+    logger.info("Wallet flagged", {wallet, reason, totalFlags:updatedFlags.length});
+  }catch(err){
+    logger.error("Failed to flag wallet", {wallet, error:err.message});
+  }
+};
+
+const runAnomalyDetection = async ({wallet, cycleId, stance, cycleStartTimestamp}) => {
+  try{
+    const [coordinated, rapid, bot] = await Promise.all([
+      detectCoordinatedVoting(cycleId),
+      detectRapidVoting(wallet),
+      detectBotBehavior(wallet, cycleStartTimestamp)
+    ]);
+
+    const anomalies = [];
+
+    if(coordinated.coordinated){
+      anomalies.push({type:"coordinated_voting", ...coordinated});
+      if(coordinated.wallets && coordinated.wallets.includes(wallet)){
+        await flagWallet(wallet, "coordinated_voting");
+      }
+    }
+
+    if(rapid.rapid){
+      anomalies.push({type:"rapid_voting", ...rapid});
+      await flagWallet(wallet, "rapid_voting");
+    }
+
+    if(bot.isBot){
+      anomalies.push({type:"bot_behavior", ...bot});
+      await flagWallet(wallet, bot.reason);
+    }
+
+    if(anomalies.length > 0){
+      logger.warn("Anomalies detected", {wallet, cycleId, anomalies});
+    }
+
+    return {detected:anomalies.length > 0, anomalies};
+  }catch(err){
+    logger.error("Failed to run anomaly detection", {wallet, cycleId, error:err.message});
+    return {detected:false, anomalies:[]};
+  }
 };
 
 const rateLimited = (key) => {
@@ -1663,11 +1929,43 @@ app.post("/api/stance", async (req,res) => {
     });
   }
 
+  const reputation = await getWalletReputation(wallet);
+  if(reputation.flagged){
+    logger.warn("Flagged wallet attempted vote", {wallet, flags:reputation.flags});
+    return res.status(403).json({
+      error:"WALLET_FLAGGED",
+      reason:"anomaly_detected",
+      flags:reputation.flags
+    });
+  }
+
+  const rateLimit = getProgressiveRateLimit(reputation.reputationScore);
   const actorId = sanitizeActorId(wallet, req);
   const rateKey = `${actorId}`;
-  if(rateLimited(rateKey)){
-    return res.status(429).json({error:"RATE_LIMIT"});
+
+  const now = Date.now();
+  const windowStart = now - rateLimit.windowMs;
+  const hits = rateStore.get(rateKey) || [];
+  const recent = hits.filter((t) => t > windowStart);
+
+  if(recent.length >= rateLimit.maxRequests){
+    logger.warn("Rate limit exceeded", {
+      wallet,
+      tier:rateLimit.tier,
+      reputationScore:reputation.reputationScore,
+      attempts:recent.length,
+      limit:rateLimit.maxRequests
+    });
+    return res.status(429).json({
+      error:"RATE_LIMIT",
+      tier:rateLimit.tier,
+      limit:rateLimit.maxRequests,
+      windowMs:rateLimit.windowMs
+    });
   }
+
+  recent.push(now);
+  rateStore.set(rateKey, recent);
 
   const state = await getLatestState();
   if(!state){
@@ -1731,6 +2029,9 @@ app.post("/api/stance", async (req,res) => {
       if(alreadyVoted){
         return res.status(409).json({error:"ALREADY_VOTED",cycleId,stanceCounts:countsOut});
       }
+      await updateWalletReputation(wallet);
+      await recordVotePattern({wallet, cycleId, stance, timestamp:nowIso()});
+      await runAnomalyDetection({wallet, cycleId, stance, cycleStartTimestamp:state.at});
       await recordEvent({
         type:"STANCE_RECORDED",
         cycleId,
@@ -1753,6 +2054,9 @@ app.post("/api/stance", async (req,res) => {
     counts[stance] = (counts[stance] || 0) + 1;
     state.stanceCounts = counts;
     await writeState(state);
+    await updateWalletReputation(wallet);
+    await recordVotePattern({wallet, cycleId, stance, timestamp:nowIso()});
+    await runAnomalyDetection({wallet, cycleId, stance, cycleStartTimestamp:state.at});
     return res.json({ok:true,cycleId,locked:false,stanceCounts:counts});
   }
   res.status(409).json({error:"ALREADY_VOTED",cycleId,stanceCounts:state.stanceCounts || defaultCounts()});
