@@ -51,11 +51,13 @@ export default function App() {
   const [loadingLines,setLoadingLines] = useState([]);
   const [typedTransmission,setTypedTransmission] = useState("");
   const [showConsensus,setShowConsensus] = useState(true);
+  const [pulseStances,setPulseStances] = useState(false);
   const audioRef = useRef(null);
   const buttonSoundRef = useRef(null);
   const timersRef = useRef([]);
   const lastGlitchRef = useRef(0);
   const lastAtRef = useRef(null);
+  const lastPulseAtRef = useRef(null);
   const audioAllowKey = "kairoAudioAllowed";
   const voteKey = "kairoVoteCycle";
 
@@ -165,6 +167,16 @@ export default function App() {
       clearTimers();
     };
   },[transmission?.at, consensusText]);
+
+  useEffect(() => {
+    if(!showConsensus || !transmission?.at) return;
+    if(lastPulseAtRef.current === transmission.at) return;
+    lastPulseAtRef.current = transmission.at;
+    if(cycleLocked || hasVoted) return;
+    setPulseStances(true);
+    const id = window.setTimeout(() => {setPulseStances(false);},900);
+    return () => {window.clearTimeout(id);};
+  },[showConsensus, transmission?.at, cycleLocked, hasVoted]);
 
   useEffect(() => {
     if(!transmission?.at) return;
@@ -552,7 +564,7 @@ export default function App() {
               <button
                 key={s}
                 type="button"
-                className={"stance "+(stance===s ? "active" : "")}
+                className={`stance ${stance===s ? "active" : ""}${pulseStances ? " pulse" : ""}`}
                 onClick={() => {playButtonSound(); submitStance(s);}}
                 disabled={!canVote}
                 aria-label={"Stance "+s}
