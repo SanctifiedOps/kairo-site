@@ -1065,7 +1065,8 @@ const saveBags = async (bags) => {
     await db.collection("config").doc("bags").set({
       topicsBagRemaining:bags.topicsBag,
       seedBagRemaining:bags.seedBag,
-      lastTopic:bags.lastTopic || null
+      lastTopic:bags.lastTopic || null,
+      lastTopicCategory:bags.lastTopicCategory || null
     }, {merge:true});
     return;
   }
@@ -1082,7 +1083,8 @@ const initBags = (bags, topics, seedConcepts) => {
   return {
     topicsBag:topicsBag.length ? topicsBag : shuffle(topicIds),
     seedBag:seedBag.length ? seedBag : shuffle(seedIds),
-    lastTopic:bags?.lastTopic || null
+    lastTopic:bags?.lastTopic || null,
+    lastTopicCategory:bags?.lastTopicCategory || null
   };
 };
 
@@ -1095,23 +1097,46 @@ const pickSeedPack = async (topicsConfigInput, seedConfigInput) => {
   const seedMap = new Map(seedsList.map((s) => [s.id, s]));
   const rawBags = await loadBags();
   const bags = initBags(rawBags, topicsList, seedsList);
+
   let topicId = null;
-  while(bags.topicsBag.length){
+  const lastCategory = bags.lastTopicCategory || null;
+
+  // Try to pick a topic from a different category than last time for more variety
+  let attempts = 0;
+  while(bags.topicsBag.length && attempts < 10){
     const candidate = bags.topicsBag.shift();
-    if(candidate && candidate !== bags.lastTopic){
-      topicId = candidate;
-      break;
+    const candidateMeta = topicMap.get(candidate);
+    const candidateCategory = candidateMeta?.category || "misc";
+
+    // Skip if same as last topic OR (same category as last AND we have other options)
+    if(candidate === bags.lastTopic){
+      attempts++;
+      continue;
     }
+    if(lastCategory && candidateCategory === lastCategory && bags.topicsBag.length > 5){
+      // Put it back at the end if we have plenty of options left
+      bags.topicsBag.push(candidate);
+      attempts++;
+      continue;
+    }
+    topicId = candidate;
+    break;
   }
+
+  // If we didn't find one, reshuffle and pick fresh
   if(!topicId){
     bags.topicsBag = shuffle(topicsList.map((t) => t.id));
     topicId = bags.topicsBag.shift();
   }
+
+  const topicMeta = topicMap.get(topicId) || {id:topicId, label:topicId, category:"misc", tags:[]};
   bags.lastTopic = topicId;
+  bags.lastTopicCategory = topicMeta.category;
+
   if(!bags.seedBag.length) bags.seedBag = shuffle(seedsList.map((s) => s.id));
   const seedId = bags.seedBag.shift();
   await saveBags(bags);
-  const topicMeta = topicMap.get(topicId) || {id:topicId, label:topicId, category:"misc", tags:[]};
+
   const seedMeta = seedMap.get(seedId) || {id:seedId, label:seedId, tags:[]};
   return {
     topics:[topicMeta.id],
@@ -1306,7 +1331,8 @@ const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSumma
   }
   parts.push(doctrineBlock);
   parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
-  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
+  parts.push("Variety Requirement: Each transmission must explore the topic from a fresh angle. Consider different: temporal frames (present/near future/distant future), scales (individual/community/civilization), mechanisms (economic/social/technological), or tones (observational/prophetic/structural).");
+  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). Avoid repeating phrasing patterns from recent transmissions.");
   return parts.join("\n");
 };
 
@@ -1330,6 +1356,9 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
   const changes = (requiredChanges || []).map((c) => `- ${c}`).join("\n") || "NONE";
   const avoid = (avoidPhrases || []).map((p) => `- ${p}`).join("\n") || "NONE";
   const doctrineBlock = buildDoctrineBlock();
+  const varietyHint = reroll
+    ? "Choose a different angle within the same topic. Consider shifting: temporal perspective, scale, mechanism of action, or narrative framing. Use fresh vocabulary and sentence structures."
+    : "Ensure linguistic variety. Avoid repeating sentence patterns or word combinations from the avoid list.";
   return [
     doctrineBlock,
     "Constraint: The doctrine is canonical. Do not contradict it.",
@@ -1339,7 +1368,8 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
     changes,
     "AVOID PHRASES:",
     avoid,
-    `Instruction: Produce the final transmission in 2-3 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). ${reroll ? "Choose a different angle within the same topic." : ""}`
+    `Variety Guidance: ${varietyHint}`,
+    `Instruction: Produce the final transmission in 2-3 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).`
   ].join("\n");
 };
 
