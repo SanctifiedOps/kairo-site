@@ -294,6 +294,11 @@ export default function App() {
   },[]);
 
   const submitStance = async (next) => {
+    if(!next || !["ALIGN","REJECT","WITHHOLD"].includes(next)){
+      setStatus("INVALID INPUT");
+      showToast("OBSERVATION PARAMETER CORRUPTED. SIGNAL REJECTED.", "error");
+      return;
+    }
     if(cycleLocked){
       setStatus("CYCLE CLOSED");
       showToast("CYCLE TERMINATED. SIGNAL WINDOW CLOSED.", "error");
@@ -414,6 +419,11 @@ export default function App() {
           const tier = j?.tier || "new";
           const limit = j?.limit || 3;
           showToast(`CONGESTION THRESHOLD EXCEEDED. TIER: ${tier.toUpperCase()}. CAPACITY: ${limit}/MIN.`, "error");
+          return;
+        }
+        if(j?.error === "INVALID_STANCE"){
+          setStatus("INVALID INPUT");
+          showToast("OBSERVATION PARAMETER CORRUPTED. SIGNAL REJECTED.", "error");
           return;
         }
         setStatus("ERROR: " + (j?.error || "UNKNOWN"));
