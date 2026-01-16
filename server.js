@@ -52,6 +52,7 @@ const ENABLE_TOKEN_GATING = process.env.ENABLE_TOKEN_GATING === "true";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID || "";
 const TELEGRAM_VIDEO_PATH = process.env.TELEGRAM_VIDEO_PATH || "./public/assets/kairo-bg.mp4";
+const TELEGRAM_VIDEO_URL = process.env.TELEGRAM_VIDEO_URL || "";
 const TELEGRAM_POSTING_ENABLED = process.env.TELEGRAM_POSTING_ENABLED === "true";
 
 const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
@@ -108,6 +109,56 @@ const logger = {
 };
 
 const nowIso = () => new Date().toISOString();
+
+const isHttpUrl = (value) => /^https?:\/\//i.test(value || "");
+
+const toPublicUrlPath = (inputPath) => {
+  if(!inputPath) return "";
+  if(isHttpUrl(inputPath)) return inputPath;
+  const normalized = inputPath.replace(/\\/g, "/");
+  const publicMarker = "/public/";
+  const publicIdx = normalized.indexOf(publicMarker);
+  if(publicIdx !== -1){
+    return normalized.slice(publicIdx + "/public".length);
+  }
+  if(normalized.startsWith("./public/")){
+    return `/${normalized.slice("./public".length)}`;
+  }
+  if(normalized.startsWith("public/")){
+    return `/${normalized.slice("public".length)}`;
+  }
+  if(normalized.startsWith("/")){
+    return normalized;
+  }
+  if(normalized.startsWith("./")){
+    return `/${normalized.slice(2)}`;
+  }
+  return `/${normalized}`;
+};
+
+const getDeployBaseUrl = () => {
+  return process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.DEPLOY_URL || "";
+};
+
+const resolveTelegramVideoSource = () => {
+  if(TELEGRAM_VIDEO_URL) return TELEGRAM_VIDEO_URL;
+  if(isHttpUrl(TELEGRAM_VIDEO_PATH)) return TELEGRAM_VIDEO_PATH;
+  const isWindowsAbs = /^[A-Za-z]:[\\/]/.test(TELEGRAM_VIDEO_PATH);
+  const localPath = (path.isAbsolute(TELEGRAM_VIDEO_PATH) || isWindowsAbs)
+    ? TELEGRAM_VIDEO_PATH
+    : path.join(__dirname, TELEGRAM_VIDEO_PATH);
+  if(fs.existsSync(localPath)) return localPath;
+  const baseUrl = getDeployBaseUrl();
+  const publicPath = toPublicUrlPath(TELEGRAM_VIDEO_PATH);
+  if(baseUrl && publicPath){
+    try{
+      return new URL(publicPath, baseUrl).toString();
+    }catch(err){
+      return null;
+    }
+  }
+  return null;
+};
 
 const alignToIntervalMs = (timestampMs, intervalMs) => {
   return Math.floor(timestampMs / intervalMs) * intervalMs;
@@ -1711,23 +1762,31 @@ const finalizeCycle = async (state) => {
 };
 
 const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
-  if(!TELEGRAM_POSTING_ENABLED || !telegramBot || !TELEGRAM_CHANNEL_ID){
+  if(!TELEGRAM_POSTING_ENABLED){
+    logger.debug("Telegram posting disabled");
+    return;
+  }
+  if(!telegramBot || !TELEGRAM_CHANNEL_ID){
+    logger.warn("Telegram not configured", {
+      hasToken:Boolean(TELEGRAM_BOT_TOKEN),
+      channelId:TELEGRAM_CHANNEL_ID
+    });
     return;
   }
 
   try{
-    const videoPath = path.join(__dirname, TELEGRAM_VIDEO_PATH);
-    if(!fs.existsSync(videoPath)){
-      logger.error("Telegram video file not found", {videoPath});
+    const videoSource = resolveTelegramVideoSource();
+    if(!videoSource){
+      logger.error("Telegram video source not found", {
+        videoPath:TELEGRAM_VIDEO_PATH,
+        videoUrl:TELEGRAM_VIDEO_URL
+      });
       return;
     }
 
     const caption = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${transmission}\n\n#KAIRO #CYCLE${cycleIndex}`;
 
-    await telegramBot.sendVideo(TELEGRAM_CHANNEL_ID, videoPath, {
-      caption,
-      parse_mode: 'HTML'
-    });
+    await telegramBot.sendVideo(TELEGRAM_CHANNEL_ID, videoSource, {caption});
 
     logger.info("Posted to Telegram", {cycleId, cycleIndex, channelId: TELEGRAM_CHANNEL_ID});
   }catch(err){

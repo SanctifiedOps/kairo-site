@@ -23,7 +23,7 @@ Every time a new transmission cycle is generated, the system will automatically:
 
 ### 2. Add Bot as Admin to Your Channel
 
-1. Open your Telegram channel: https://t.me/kairoresidual
+1. Open your Telegram channel: https://t.me/your_channel
 2. Go to Channel Info → Administrators
 3. Click "Add Admin"
 4. Search for your bot username (e.g., @kairo_transmission_bot)
@@ -31,7 +31,7 @@ Every time a new transmission cycle is generated, the system will automatically:
 
 ### 3. Get Your Channel ID (Optional)
 
-Your channel ID is: `@kairoresidual`
+Your channel ID is: `@your_channel`
 
 If you want to use the numeric ID instead:
 1. Forward a message from your channel to **@userinfobot**
@@ -44,8 +44,9 @@ Create a `.env` file in your project root (copy from `.env.example`):
 ```bash
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
-TELEGRAM_CHANNEL_ID=@kairoresidual
+TELEGRAM_CHANNEL_ID=@your_channel
 TELEGRAM_VIDEO_PATH=./public/assets/kairo-bg.mp4
+TELEGRAM_VIDEO_URL=
 TELEGRAM_POSTING_ENABLED=true
 
 # Other required environment variables
@@ -56,8 +57,9 @@ OPENAI_API_KEY=your_openai_key
 
 **Required Variables:**
 - `TELEGRAM_BOT_TOKEN` - Token from BotFather (step 1)
-- `TELEGRAM_CHANNEL_ID` - Your channel (@kairoresidual or numeric ID)
+- `TELEGRAM_CHANNEL_ID` - Your channel (@your_channel or numeric ID)
 - `TELEGRAM_VIDEO_PATH` - Path to video file (default: ./public/assets/kairo-bg.mp4)
+- `TELEGRAM_VIDEO_URL` - Optional public URL for the video (recommended on Netlify)
 - `TELEGRAM_POSTING_ENABLED` - Set to `true` to enable posting
 
 ### 5. Verify Video File Exists
@@ -67,6 +69,7 @@ Make sure the video file exists at: `./public/assets/kairo-bg.mp4`
 If you want to use a different video:
 1. Place your .mp4 file in the project
 2. Update `TELEGRAM_VIDEO_PATH` in .env to point to your file
+3. On Netlify, prefer `TELEGRAM_VIDEO_URL` set to your deployed asset URL (example: `https://your-site.netlify.app/assets/kairo-bot.mp4`)
 
 ### 6. Test the Integration
 
@@ -108,6 +111,7 @@ With the kairo-bg.mp4 video attached.
 - Verify file exists at path specified in `TELEGRAM_VIDEO_PATH`
 - Check file size (Telegram has a 50MB limit for bot API)
 - Ensure server has read permissions for the video file
+- On Netlify, use `TELEGRAM_VIDEO_URL` since functions may not have local file access
 
 ### Posts not appearing
 - Check `TELEGRAM_POSTING_ENABLED=true` in .env
