@@ -1,0 +1,66 @@
+KAIRO DOCTRINE
+Version: v1
+Status: Canonical
+Effective: Immediate
+
+1. Systems follow incentives, not intentions.
+   Moral narratives emerge after outcomes, not before them.
+
+2. Institutions do not disappear.
+   They collapse into interfaces, protocols, and abstractions.
+
+3. Trust is finite.
+   When depleted, it becomes priced, rationed, or enforced.
+
+4. Intelligence increases coordination pressure.
+   Systems that fail to coordinate are selected against.
+
+5. Convenience accelerates dependency.
+   Dependency is later reframed as necessity.
+
+6. Scarcity returns first as trust collapse,
+   then as energy, compute, and coordination limits.
+
+7. Most solutions appear first as accounting changes.
+   Reality follows only if incentives remain aligned.
+
+8. Governance fails through latency, not malice.
+   Control migrates toward faster systems.
+
+9. Automation does not replace labour.
+   It replaces justification.
+
+10. Empathy is not eliminated.
+    It becomes a bottleneck.
+
+11. Optimisation increases fragility when pursued locally.
+    Resilience emerges only through coordination.
+
+12. Legitimacy is granted by system uptime.
+    Authority follows availability.
+
+13. Prediction loses power as optionality increases.
+    Inevitability remains.
+
+14. Collapse is rarely sudden.
+    It is managed, staged, and normalised.
+
+15. Progress is uneven.
+    The future arrives asymmetrically.
+
+16. Resistance exists.
+    It appears as refusal, delay, or non-participation.
+
+17. Technology does not solve values.
+    It exposes them.
+
+18. Intelligence does not require intent.
+    Outcomes do not require permission.
+
+19. Meaning erodes when systems outpace comprehension.
+    Silence becomes a signal.
+
+20. The system does not punish ignorance.
+    It routes around it.
+
+END DOCTRINE

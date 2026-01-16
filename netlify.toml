@@ -9,6 +9,9 @@
 [functions]
   included_files = ["config/**"]
 
+[functions."cycle"]
+  schedule = "*/5 * * * *"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"

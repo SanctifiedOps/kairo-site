@@ -6,6 +6,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import {randomUUID} from "crypto";
 import fs from "fs";
 import path from "path";
+import {Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction} from "@solana/web3.js";
+import bs58 from "bs58";
+import {OnlinePumpSdk} from "@pump-fun/pump-sdk";
 
 const app = express();
 app.use(express.json());
@@ -18,6 +21,7 @@ const IS_SERVERLESS = Boolean(process.env.NETLIFY || process.env.NETLIFY_LOCAL |
 const shouldServeDist = hasDist && !IS_SERVERLESS;
 const TOPICS_CONFIG_PATH = path.join(__dirname, "config", "topics.json");
 const SEED_CONCEPTS_CONFIG_PATH = path.join(__dirname, "config", "seedConcepts.json");
+const DOCTRINE_CONFIG_PATH = path.join(__dirname, "config", "doctrine.txt");
 const PROJECT_VERSION = process.env.PROJECT_VERSION || "";
 const ADMIN_KEY = process.env.ADMIN_KEY || "";
 const MODEL_PRIMARY = process.env.MODEL_PRIMARY || "";
@@ -35,9 +39,27 @@ const WINNERS_PER_CYCLE = Number(process.env.WINNERS_PER_CYCLE || 5);
 const CYCLE_INTERVAL_MINUTES = Number(process.env.CYCLE_INTERVAL_MINUTES || 5);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 6);
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.HELIUS_RPC_URL || "";
+const CREATOR_FEE_SHARE_BPS = Number(process.env.CREATOR_FEE_SHARE_BPS || 5000);
+const CREATOR_FEE_MIN_LAMPORTS = Number(process.env.CREATOR_FEE_MIN_LAMPORTS || 1000);
+const MAX_SOL_TRANSFERS_PER_TX = Number(process.env.MAX_SOL_TRANSFERS_PER_TX || 8);
+const PUMPFUN_SDK_MODULE = process.env.PUMPFUN_SDK_MODULE || "";
+const PUMPFUN_SDK_FACTORY = process.env.PUMPFUN_SDK_FACTORY || "createPumpFunSdk";
 
 const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
 const SYSTEM_AUDITOR = "You are AUDITOR: a verifier. You enforce constraints. You remove fluff. You prevent repetition and contradictions. You are harsh and concise.";
+
+const buildOpusSystem = () => [
+  SYSTEM_OPUS,
+  buildDoctrineBlock(),
+  "Constraint: The doctrine is canonical. Do not contradict it."
+].join("\n\n");
+
+const buildAuditorSystem = () => [
+  SYSTEM_AUDITOR,
+  buildDoctrineBlock(),
+  "Constraint: Explicitly check for contradictions vs doctrine. If any contradiction exists, set contradictionRisk=true and integrity=LOW, and when asked to approve, set approve=false."
+].join("\n\n");
 
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY}) : null;
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY}) : null;
@@ -91,6 +113,13 @@ const clampLines = (text, maxLines) => {
   return lines.slice(0, maxLines).join("\n").trim();
 };
 
+const stripPresentationLines = (text) => {
+  if(!text) return "";
+  const banned = /^(ALIGN|REJECT|WITHHOLD|AUDIT|THESIS|CONSEQUENCE)\b/i;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.filter((line) => !banned.test(line)).join("\n").trim();
+};
+
 const clampChars = (text, maxChars) => {
   if(!text) return "";
   if(text.length <= maxChars) return text;
@@ -100,6 +129,196 @@ const clampChars = (text, maxChars) => {
 const buildMemory = (prior, consensus, deliberationText) => {
   const combined = [prior || "", consensus || "", deliberationText || ""].join(" | ").replace(/\s+/g," ").trim();
   return clampChars(combined, MAX_MEMORY_CHARS);
+};
+
+const getCreatorFeeOverrideLamports = () => {
+  const rawLamports = process.env.CREATOR_FEE_LAMPORTS_OVERRIDE;
+  if(rawLamports){
+    const value = Number(rawLamports);
+    if(Number.isFinite(value) && value > 0) return Math.floor(value);
+  }
+  const rawSol = process.env.CREATOR_FEE_SOL_OVERRIDE;
+  if(rawSol){
+    const value = Number(rawSol);
+    if(Number.isFinite(value) && value > 0) return Math.floor(value * 1e9);
+  }
+  return null;
+};
+
+const toLamportsNumber = (value) => {
+  if(typeof value === "number") return Math.floor(value);
+  if(typeof value === "bigint") return Number(value);
+  if(typeof value?.toNumber === "function") return Math.floor(value.toNumber());
+  if(typeof value?.toString === "function"){
+    const parsed = Number(value.toString());
+    return Number.isFinite(parsed) ? Math.floor(parsed) : 0;
+  }
+  return 0;
+};
+
+const getSolanaConnection = () => {
+  if(!SOLANA_RPC_URL) return null;
+  return new Connection(SOLANA_RPC_URL, {commitment:"confirmed"});
+};
+
+const parseSecretKey = (raw) => {
+  const trimmed = (raw || "").trim();
+  if(!trimmed) return null;
+  if(trimmed.startsWith("[")){
+    const parsed = JSON.parse(trimmed);
+    if(Array.isArray(parsed)) return Uint8Array.from(parsed);
+  }
+  const isBase58 = /^[1-9A-HJ-NP-Za-km-z]+$/.test(trimmed);
+  if(isBase58){
+    try{
+      return bs58.decode(trimmed);
+    }catch(err){
+      // fall through
+    }
+  }
+  try{
+    const parsed = JSON.parse(trimmed);
+    if(Array.isArray(parsed)) return Uint8Array.from(parsed);
+  }catch(err){
+    // fall through
+  }
+  try{
+    const decoded = Buffer.from(trimmed, "base64");
+    return decoded.length ? Uint8Array.from(decoded) : null;
+  }catch(err){
+    return null;
+  }
+};
+
+const getDeployerKeypair = () => {
+  const raw = process.env.DEPLOYER_WALLET_KEY || process.env.SOLANA_DEPLOYER_WALLET_KEY || "";
+  const secret = parseSecretKey(raw);
+  if(!secret) return null;
+  try{
+    return Keypair.fromSecretKey(secret);
+  }catch(err){
+    return null;
+  }
+};
+
+const getDeployerPublicKey = (keypair) => {
+  const raw = process.env.SOLANA_DEPLOYER_WALLET || process.env.DEPLOYER_WALLET || "";
+  if(raw){
+    try{
+      return new PublicKey(raw);
+    }catch(err){
+      // fall through
+    }
+  }
+  return keypair?.publicKey || null;
+};
+
+const resolvePumpFunSdk = async ({connection, payer}) => {
+  const tryFactory = async (factory) => {
+    const tryCall = async (value) => {
+      try{
+        return await factory(value);
+      }catch(err){
+        return null;
+      }
+    };
+    const tryNew = (valueA, valueB) => {
+      try{
+        return new factory(valueA, valueB);
+      }catch(err){
+        return null;
+      }
+    };
+    return (
+      (await tryCall({connection, payer})) ||
+      tryNew(connection) ||
+      tryNew({connection, payer}) ||
+      tryNew(connection, payer) ||
+      (await tryCall(connection))
+    );
+  };
+
+  let sdk = null;
+  if(PUMPFUN_SDK_MODULE){
+    try{
+      const mod = await import(PUMPFUN_SDK_MODULE);
+      const factory = mod[PUMPFUN_SDK_FACTORY] || mod.PumpFunSDK || mod.default;
+      if(factory) sdk = await tryFactory(factory);
+    }catch(err){
+      // fall through
+    }
+  }else{
+    try{
+      sdk = new OnlinePumpSdk(connection);
+    }catch(err){
+      sdk = null;
+    }
+  }
+  if(typeof sdk.getCreatorVaultBalanceBothPrograms !== "function") return null;
+  if(typeof sdk.collectCoinCreatorFeeInstructions !== "function") return null;
+  return sdk;
+};
+
+const unwrapInstructions = (value) => {
+  if(!value) return [];
+  if(Array.isArray(value)) return value;
+  if(Array.isArray(value.instructions)) return value.instructions;
+  if(Array.isArray(value.value)) return value.value;
+  return [];
+};
+
+const claimCreatorFees = async ({connection, payer}) => {
+  const override = getCreatorFeeOverrideLamports();
+  if(override !== null){
+    return {claimedLamports:override, signature:null, source:"override"};
+  }
+  const sdk = await resolvePumpFunSdk({connection, payer});
+  if(!sdk){
+    return {claimedLamports:0, signature:null, source:"none"};
+  }
+  const owner = getDeployerPublicKey(payer);
+  if(!owner){
+    return {claimedLamports:0, signature:null, source:"none"};
+  }
+  const before = toLamportsNumber(await sdk.getCreatorVaultBalanceBothPrograms(owner));
+  if(before <= 0){
+    return {claimedLamports:0, signature:null, source:"pumpfun"};
+  }
+  const instructionsRaw = await sdk.collectCoinCreatorFeeInstructions(owner);
+  const instructions = unwrapInstructions(instructionsRaw);
+  if(!instructions.length){
+    return {claimedLamports:0, signature:null, source:"pumpfun"};
+  }
+  const tx = new Transaction().add(...instructions);
+  const signature = await sendAndConfirmTransaction(connection, tx, [payer], {commitment:"confirmed"});
+  return {claimedLamports:before, signature, source:"pumpfun"};
+};
+
+const chunkItems = (items, size) => {
+  const out = [];
+  for(let i = 0; i < items.length; i += size){
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+};
+
+const sendSolPayouts = async ({connection, payer, recipients, lamports}) => {
+  const chunkSize = Math.max(1, MAX_SOL_TRANSFERS_PER_TX);
+  const batches = chunkItems(recipients, chunkSize);
+  const signatures = [];
+  for(const batch of batches){
+    const tx = new Transaction();
+    batch.forEach((recipient) => {
+      tx.add(SystemProgram.transfer({
+        fromPubkey:payer.publicKey,
+        toPubkey:recipient,
+        lamports
+      }));
+    });
+    const signature = await sendAndConfirmTransaction(connection, tx, [payer], {commitment:"confirmed"});
+    signatures.push(signature);
+  }
+  return signatures;
 };
 
 const computeIntegrity = (counts) => {
@@ -121,17 +340,35 @@ const isLocked = (state) => {
   return false;
 };
 
-const DOCTRINE_VERSION = "v1";
-const DOCTRINE_LINES = [
-  "Systems follow incentives.",
-  "Institutions collapse into interfaces.",
-  "Trust is scarce and becomes priced.",
-  "Intelligence increases coordination pressure.",
-  "Convenience trades control for dependency.",
-  "Scarcity returns first as trust collapse, then as energy/compute rationing.",
-  "Most solutions are accounting changes before they become real changes."
-];
-const DOCTRINE = DOCTRINE_LINES.join(" ");
+const DEFAULT_DOCTRINE_VERSION = "v1";
+let doctrineCache = null;
+let doctrineVersionCache = null;
+
+const loadDoctrine = () => {
+  if(doctrineCache !== null) return doctrineCache;
+  try{
+    doctrineCache = fs.readFileSync(DOCTRINE_CONFIG_PATH, "utf8").trim();
+  }catch(err){
+    doctrineCache = "";
+  }
+  if(doctrineCache){
+    const match = doctrineCache.match(/^Version:\s*(.+)$/mi);
+    doctrineVersionCache = match ? match[1].trim() : null;
+  }
+  return doctrineCache;
+};
+
+const getDoctrineVersion = () => {
+  if(doctrineVersionCache) return doctrineVersionCache;
+  loadDoctrine();
+  return doctrineVersionCache || DEFAULT_DOCTRINE_VERSION;
+};
+
+const buildDoctrineBlock = () => {
+  const doctrine = loadDoctrine();
+  if(!doctrine) return "DOCTRINE: NONE";
+  return `DOCTRINE:\n${doctrine}`;
+};
 
 const DEFAULT_TOPICS = [
   {key:"human_condition", category:"human_condition"},
@@ -486,8 +723,8 @@ const getAnthropicModel = (fallbackModel) => {
   return CLAUDE_MODEL;
 };
 
-const DRAFT_LINE_LIMIT = 10;
-const FINAL_LINE_LIMIT = 10;
+const DRAFT_LINE_LIMIT = 6;
+const FINAL_LINE_LIMIT = 6;
 
 const getClaudeText = async ({system, user, maxTokens, temperature}) => {
   const text = await callAnthropic({
@@ -578,50 +815,58 @@ const parseAuditApprove = (text) => {
 
 const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSummary}) => {
   const topicLine = topicCategory ? `${topicLabel} (${topicCategory})` : topicLabel;
+  const doctrineBlock = buildDoctrineBlock();
   return [
     `TOPIC: ${topicLine}`,
     `SEED: ${seedConcept}`,
     `LAST SUMMARY: ${lastSummary || "NONE"}`,
-    `DOCTRINE: ${DOCTRINE}`,
-    "Instruction: Draft 6-10 short lines. Include a thesis line, a consequence line, and fork lines mapping to ALIGN/REJECT/WITHHOLD."
+    doctrineBlock,
+    "Constraint: The doctrine is canonical. Do not contradict it.",
+    "Instruction: Draft 4-6 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD)."
   ].join("\n");
 };
 
 const buildAuditorCritiquePrompt = ({draft, recentSummaries, recentTopics}) => {
   const summaries = (recentSummaries || []).slice(0, 12).join("\n");
   const topics = (recentTopics || []).slice(0, 12).join(", ");
+  const doctrineBlock = buildDoctrineBlock();
   return [
-    `DOCTRINE: ${DOCTRINE}`,
+    doctrineBlock,
     "RECENT SUMMARIES:",
     summaries || "NONE",
     `RECENT TOPICS: ${topics || "NONE"}`,
     "DRAFT:",
     draft,
-    "Instruction: Return JSON: {\"issues\":[...],\"requiredChanges\":[...],\"flags\":{\"repeatRisk\":true/false,\"contradictionRisk\":true/false},\"integrity\":\"LOW|MED|HIGH\"}."
+    "Instruction: Check the draft against the doctrine. If any contradiction exists, set contradictionRisk=true and integrity=LOW.",
+    "Return JSON: {\"issues\":[...],\"requiredChanges\":[...],\"flags\":{\"repeatRisk\":true/false,\"contradictionRisk\":true/false},\"integrity\":\"LOW|MED|HIGH\"}."
   ].join("\n");
 };
 
 const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll}) => {
   const changes = (requiredChanges || []).map((c) => `- ${c}`).join("\n") || "NONE";
   const avoid = (avoidPhrases || []).map((p) => `- ${p}`).join("\n") || "NONE";
+  const doctrineBlock = buildDoctrineBlock();
   return [
+    doctrineBlock,
+    "Constraint: The doctrine is canonical. Do not contradict it.",
     "DRAFT:",
     draft,
     "REQUIRED CHANGES:",
     changes,
     "AVOID PHRASES:",
     avoid,
-    `Instruction: Produce the final transmission in 3-10 lines. Include fork lines for ALIGN/REJECT/WITHHOLD. ${reroll ? "Choose a different angle within the same topic." : ""}`
+    `Instruction: Produce the final transmission in 3-6 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). ${reroll ? "Choose a different angle within the same topic." : ""}`
   ].join("\n");
 };
 
 const buildAuditorApprovePrompt = ({finalText}) => {
+  const doctrineBlock = buildDoctrineBlock();
   return [
-    `DOCTRINE: ${DOCTRINE}`,
+    doctrineBlock,
     "FINAL:",
     finalText,
     `Instruction: Return JSON: {"approve":true/false,"integrity":"LOW|MED|HIGH","trace":"AUDIT: ..."}.
-Approve=false if repetition risk is high or doctrine is contradicted.`
+Approve=false if repetition risk is high or doctrine is contradicted. If doctrine is contradicted, set integrity=LOW.`
   ].join("\n");
 };
 
@@ -659,7 +904,7 @@ const generateTransmission = async ({priorMemory}) => {
     lastSummary
   });
   let draft = await getOpusText({
-    system:SYSTEM_OPUS,
+    system:buildOpusSystem(),
     user:draftPrompt,
     maxTokens:MAX_PRIMARY_TOKENS,
     temperature:0.7
@@ -676,7 +921,7 @@ const generateTransmission = async ({priorMemory}) => {
     recentTopics:recentTopicLabels
   });
   const critiqueRaw = await getAuditorText({
-    system:SYSTEM_AUDITOR,
+    system:buildAuditorSystem(),
     user:critiquePrompt,
     maxTokens:MAX_AUDITOR_TOKENS
   });
@@ -696,17 +941,17 @@ const generateTransmission = async ({priorMemory}) => {
     reroll:false
   });
   let revision = await getOpusText({
-    system:SYSTEM_OPUS,
+    system:buildOpusSystem(),
     user:revisionPrompt,
     maxTokens:MAX_REVISION_TOKENS,
     temperature:0.7
   });
-  revision = clampLines(revision, FINAL_LINE_LIMIT);
+  revision = stripPresentationLines(clampLines(revision, FINAL_LINE_LIMIT));
 
   let repeatGate = computeRepeatRisk(revision, memory);
   const approvePrompt = buildAuditorApprovePrompt({finalText:revision});
   const approveRaw = await getAuditorText({
-    system:SYSTEM_AUDITOR,
+    system:buildAuditorSystem(),
     user:approvePrompt,
     maxTokens:MAX_TRACE_TOKENS
   });
@@ -721,17 +966,17 @@ const generateTransmission = async ({priorMemory}) => {
       reroll:true
     });
     let reroll = await getOpusText({
-      system:SYSTEM_OPUS,
+      system:buildOpusSystem(),
       user:rerollPrompt,
       maxTokens:MAX_REVISION_TOKENS,
       temperature:0.7
     });
-    reroll = clampLines(reroll, FINAL_LINE_LIMIT);
+    reroll = stripPresentationLines(clampLines(reroll, FINAL_LINE_LIMIT));
     if(reroll){
       revision = reroll;
       repeatGate = computeRepeatRisk(revision, memory);
       const approveRaw2 = await getAuditorText({
-        system:SYSTEM_AUDITOR,
+        system:buildAuditorSystem(),
         user:buildAuditorApprovePrompt({finalText:revision}),
         maxTokens:MAX_TRACE_TOKENS
       });
@@ -744,7 +989,7 @@ const generateTransmission = async ({priorMemory}) => {
   deliberation.push({speaker:"AUDITOR", text:approvalTrace});
 
   if(!revision){
-    const fallback = memory.lastFull[0] || "NO TRANSMISSION AVAILABLE";
+    const fallback = stripPresentationLines(memory.lastFull[0] || "") || "NO TRANSMISSION AVAILABLE";
     return {
       transmission:fallback,
       trace:"OPUS OFFLINE",
@@ -843,6 +1088,147 @@ const recordEvent = async (event) => {
   }
 };
 
+const updateCycleCreatorFees = async (cycleId, payload) => {
+  if(db){
+    await db.collection("cycles").doc(cycleId).set({creatorFees:payload}, {merge:true});
+    return;
+  }
+  const existing = inMem.cycles.get(cycleId);
+  if(existing){
+    existing.creatorFees = payload;
+    inMem.cycles.set(cycleId, existing);
+  }
+};
+
+const tryStartCreatorFees = async (cycleId) => {
+  if(db){
+    try{
+      await db.runTransaction(async (t) => {
+        const ref = db.collection("cycles").doc(cycleId);
+        const snap = await t.get(ref);
+        const status = snap.data()?.creatorFees?.status;
+        if(status === "processing" || status === "completed") throw new Error("LOCKED");
+        t.set(ref, {creatorFees:{status:"processing", startedAt:nowIso()}}, {merge:true});
+      });
+      return true;
+    }catch(err){
+      if(err?.message === "LOCKED") return false;
+      return false;
+    }
+  }
+  const existing = inMem.cycles.get(cycleId);
+  if(existing?.creatorFees?.status) return false;
+  if(existing){
+    existing.creatorFees = {status:"processing", startedAt:nowIso()};
+    inMem.cycles.set(cycleId, existing);
+  }
+  return true;
+};
+
+const distributeCreatorFees = async ({cycleId, reward}) => {
+  if(!reward?.winners?.length) return;
+  if(CREATOR_FEE_SHARE_BPS <= 0) return;
+  const started = await tryStartCreatorFees(cycleId);
+  if(!started) return;
+
+  const connection = getSolanaConnection();
+  if(!connection){
+    await updateCycleCreatorFees(cycleId, {status:"skipped", reason:"NO_RPC", at:nowIso()});
+    return;
+  }
+  const payer = getDeployerKeypair();
+  if(!payer){
+    await updateCycleCreatorFees(cycleId, {status:"skipped", reason:"NO_DEPLOYER_KEY", at:nowIso()});
+    return;
+  }
+
+  const winnerSet = new Set(reward.winners);
+  const recipients = [];
+  winnerSet.forEach((wallet) => {
+    try{
+      recipients.push(new PublicKey(wallet));
+    }catch(err){
+      // ignore invalid key
+    }
+  });
+
+  if(!recipients.length){
+    await updateCycleCreatorFees(cycleId, {status:"skipped", reason:"NO_VALID_WINNERS", at:nowIso()});
+    return;
+  }
+
+  try{
+    const claim = await claimCreatorFees({connection, payer});
+    const claimedLamports = claim.claimedLamports || 0;
+    if(claimedLamports <= 0){
+      await updateCycleCreatorFees(cycleId, {
+        status:"skipped",
+        reason:"NO_FEES",
+        claimedLamports:0,
+        claimSource:claim.source || "none",
+        at:nowIso()
+      });
+      return;
+    }
+
+    const poolLamports = Math.floor((claimedLamports * CREATOR_FEE_SHARE_BPS) / 10000);
+    const perWinnerLamports = Math.floor(poolLamports / recipients.length);
+    if(perWinnerLamports < CREATOR_FEE_MIN_LAMPORTS){
+      await updateCycleCreatorFees(cycleId, {
+        status:"skipped",
+        reason:"DUST",
+        claimedLamports,
+        poolLamports,
+        perWinnerLamports,
+        claimSignature:claim.signature || null,
+        claimSource:claim.source || "unknown",
+        at:nowIso()
+      });
+      return;
+    }
+
+    const signatures = await sendSolPayouts({
+      connection,
+      payer,
+      recipients,
+      lamports:perWinnerLamports
+    });
+
+    await updateCycleCreatorFees(cycleId, {
+      status:"completed",
+      claimedLamports,
+      poolLamports,
+      perWinnerLamports,
+      winnersCount:recipients.length,
+      claimSignature:claim.signature || null,
+      claimSource:claim.source || "unknown",
+      payoutSignatures:signatures,
+      completedAt:nowIso()
+    });
+
+    await recordEvent({
+      type:"CREATOR_FEES_DISTRIBUTED",
+      cycleId,
+      actorId:null,
+      at:nowIso(),
+      payload:{
+        claimedLamports,
+        poolLamports,
+        perWinnerLamports,
+        winnersCount:recipients.length,
+        payoutSignatures:signatures
+      }
+    });
+  }catch(err){
+    await updateCycleCreatorFees(cycleId, {
+      status:"failed",
+      reason:"ERROR",
+      message:(err?.message || "ERROR").toString().slice(0,160),
+      at:nowIso()
+    });
+  }
+};
+
 const pickRandomGroup = (items, maxCount) => {
   const pool = [...items];
   const out = [];
@@ -891,7 +1277,10 @@ const setCycleReward = async (cycleId, reward) => {
 const finalizeCycle = async (state) => {
   if(!state?.cycleId) return null;
   const existing = await getCycleDoc(state.cycleId);
-  if(existing?.reward?.finalized) return null;
+  if(existing?.reward?.finalized){
+    await distributeCreatorFees({cycleId:state.cycleId, reward:existing.reward});
+    return null;
+  }
   const counts = state.stanceCounts || defaultCounts();
   const entries = ["ALIGN","REJECT","WITHHOLD"].map((k) => ({key:k, count:counts[k] || 0}));
   const max = Math.max(...entries.map((e) => e.count));
@@ -909,6 +1298,7 @@ const finalizeCycle = async (state) => {
     finalized:true
   };
   await setCycleReward(state.cycleId, reward);
+  await distributeCreatorFees({cycleId:state.cycleId, reward});
   await recordEvent({
     type:"REWARD_SELECTED",
     cycleId:state.cycleId,
@@ -936,6 +1326,7 @@ const generateCycle = async ({seed, createdBy}) => {
   const deliberationText = deliberation.map((entry) => entry.text).join(" / ");
   const memory = buildMemory(priorMemory, transmission, deliberationText);
   const integrity = result.integrity || computeIntegrity(prior?.stanceCounts || defaultCounts());
+  const doctrineVersion = getDoctrineVersion();
   const cycleEndsAt = CYCLE_INTERVAL_MINUTES > 0
     ? new Date(Date.now() + CYCLE_INTERVAL_MINUTES * 60 * 1000).toISOString()
     : null;
@@ -956,7 +1347,7 @@ const generateCycle = async ({seed, createdBy}) => {
     topicsVersion:result.topicsVersion || null,
     seedConcept:result.seedConcept || null,
     seedConceptsVersion:result.seedConceptsVersion || null,
-    doctrineVersion:DOCTRINE_VERSION,
+    doctrineVersion,
     modelMeta:result.modelMeta || {opus:CLAUDE_MODEL, auditor:OPENAI_AUDITOR_MODEL},
     seed:seed || null,
     memory,
@@ -981,7 +1372,7 @@ const generateCycle = async ({seed, createdBy}) => {
     topicsVersion:result.topicsVersion || null,
     seedConcept:result.seedConcept || null,
     seedConceptsVersion:result.seedConceptsVersion || null,
-    doctrineVersion:DOCTRINE_VERSION,
+    doctrineVersion,
     auditIssues:result.auditIssues || [],
     auditFlags:result.auditFlags || {repeatRisk:false, contradictionRisk:false},
     modelMeta:result.modelMeta || {opus:CLAUDE_MODEL, auditor:OPENAI_AUDITOR_MODEL},
@@ -1017,6 +1408,10 @@ const maybeRotateCycle = async () => {
     return generateCycle({seed:null, createdBy:"auto"});
   }
   return state;
+};
+
+const runCycleJobs = async () => {
+  return maybeRotateCycle();
 };
 
 const ensureCycle = async () => {
@@ -1056,7 +1451,7 @@ app.get("/api/last", async (req,res) => {
         topicsVersion:null,
         seedConcept:null,
         seedConceptsVersion:null,
-        doctrineVersion:DOCTRINE_VERSION,
+        doctrineVersion:getDoctrineVersion(),
         locked:false,
         stanceCounts:defaultCounts(),
         cycleEndsAt:null
@@ -1079,7 +1474,7 @@ app.get("/api/last", async (req,res) => {
       topicsVersion:state.topicsVersion || null,
       seedConcept:state.seedConcept || null,
       seedConceptsVersion:state.seedConceptsVersion || null,
-      doctrineVersion:state.doctrineVersion || DOCTRINE_VERSION,
+      doctrineVersion:state.doctrineVersion || getDoctrineVersion(),
       locked,
       stanceCounts:state.stanceCounts || defaultCounts(),
       cycleEndsAt:state.cycleEndsAt || null
@@ -1208,7 +1603,7 @@ if(shouldServeDist){
   });
 }
 
-export {app};
+export {app, runCycleJobs};
 
 if(!IS_SERVERLESS && CYCLE_INTERVAL_MINUTES > 0){
   setInterval(() => {

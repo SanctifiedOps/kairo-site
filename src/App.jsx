@@ -488,10 +488,6 @@ export default function App() {
             )}
           </div>
 
-          {transmission?.secondary ? (
-            <div className="txSecondary">{transmission.secondary}</div>
-          ) : null}
-
           <div className="stanceRow">
             {STANCES.map((s) => (
               <button

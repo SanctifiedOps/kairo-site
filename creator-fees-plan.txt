@@ -1,0 +1,64 @@
+Creator Fees Distribution (Plan)
+
+Purpose
+- Use each cycle's randomly chosen winners to distribute a creator fee pool.
+- Claim creator fees via @pump-fun/pump-sdk, then split SOL payouts to winners.
+
+Pump Segments SDK (from https://github.com/pump-fun/pump-segments-sdk)
+- Main entry: SegmentClient (DynamoDBDocumentClient wrapper)
+- Data model:
+  - Membership item PK: SEGMENT#{segmentId}#V#{versionId}, SK: USER#{userId}
+  - Metadata item PK: SEGMENT#{segmentId}#META, SK: METADATA
+- Key APIs:
+  - isMember(segmentId, userId): boolean
+  - getMetadata(segmentId): versionId, memberCount, status
+  - exportUsers(segmentId, {cursor, limit, sample}): user list
+- Dependencies needed in this repo:
+  - @aws-sdk/client-dynamodb
+  - @aws-sdk/lib-dynamodb
+  - imurmurhash (for sampling bucket compatibility)
+- Note: SDK repo ships TypeScript source only (no dist build). We'll either:
+  - Copy its src into a local module, or
+  - Add a build step to generate dist and import from that.
+
+Pump SDK (fees claim)
+- Package: @pump-fun/pump-sdk
+- Use OnlinePumpSdk:
+  - getCreatorVaultBalanceBothPrograms(creator)
+  - collectCoinCreatorFeeInstructions(creator)
+
+Proposed Backend Flow (no on-chain transfer yet)
+1) finalizeCycle() chooses winners (already implemented) and stores cycles/{cycleId}.reward.
+2) New function buildCreatorFeePlan() takes:
+   - cycleId
+   - winners[] (wallets from reward)
+   - poolBasis (total fees for this cycle)
+   - split rules (equal, weighted, tiered)
+   - segment gating/weights (optional)
+3) buildCreatorFeePlan() returns:
+   - recipients[]: [{wallet, weight, amount, segments:[]}]
+   - totals: {poolAmount, distributedAmount}
+   - status: "planned"
+4) Store plan at cycles/{cycleId}.creatorFees and emit event CREATOR_FEES_PLANNED.
+5) Later, a separate worker/manual job executes payments and marks status "paid".
+
+Segment Gating / Weighting (example)
+- Define segment rules (config or env):
+  - segmentId: "mobile-high-volume-traders", weight: 1.2
+  - segmentId: "mobile-active-yesterday", weight: 1.0
+- For each winner:
+  - Check membership via SegmentClient
+  - Multiply base weight by matched segment weights
+  - Normalize weights and compute per-wallet amounts
+
+Required Config (proposal)
+- PUMP_SEGMENTS_TABLE (DynamoDB table name)
+- AWS_REGION (or PUMP_SEGMENTS_REGION)
+- Optional: PUMP_SEGMENTS_ENDPOINT (local testing)
+- CREATOR_FEE_BPS or CREATOR_FEE_POOL_SOURCE
+
+Next Implementation Steps
+- Add a local PumpSegments client wrapper (based on SDK).
+- Add creator-fees module with buildCreatorFeePlan().
+- Wire buildCreatorFeePlan() into finalizeCycle() after reward selection.
+- Add Firestore schema update for creatorFees + events.
