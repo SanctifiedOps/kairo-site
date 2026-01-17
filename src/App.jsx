@@ -32,9 +32,19 @@ const formatWallet = (addr) => {
 };
 
 const getProvider = () => {
-  if(window.solana?.isPhantom) return window.solana;
-  if(window.solflare?.isSolflare) return window.solflare;
-  if(window.solana?.isSolflare) return window.solana;
+  if(window.solana?.isPhantom){
+    console.log("Phantom wallet detected");
+    return window.solana;
+  }
+  if(window.solflare?.isSolflare){
+    console.log("Solflare wallet detected");
+    return window.solflare;
+  }
+  if(window.solana?.isSolflare){
+    console.log("Solflare wallet detected (via solana object)");
+    return window.solana;
+  }
+  console.log("No Solana wallet detected. window.solana:", window.solana, "window.solflare:", window.solflare);
   return null;
 };
 
@@ -274,27 +284,53 @@ export default function App() {
   },[]);
 
   useEffect(() => {
-    const provider = getProvider();
-    if(!provider) return;
-    setWalletProvider(provider);
-    if(provider.isConnected && provider.publicKey){
-      setWallet(provider.publicKey.toString());
-    }
-    const onConnect = (pub) => {
-      const key = pub?.toString?.() || provider.publicKey?.toString?.();
-      if(key) setWallet(key);
-    };
-    const onDisconnect = () => {setWallet(null);};
-    if(provider.on){
-      provider.on("connect", onConnect);
-      provider.on("disconnect", onDisconnect);
-    }
-    return () => {
-      if(provider.off){
-        provider.off("connect", onConnect);
-        provider.off("disconnect", onDisconnect);
+    const setupWallet = () => {
+      const provider = getProvider();
+      if(!provider){
+        console.log("No wallet provider found on initial check");
+        return false;
       }
+      setWalletProvider(provider);
+      if(provider.isConnected && provider.publicKey){
+        setWallet(provider.publicKey.toString());
+        console.log("Wallet auto-connected:", provider.publicKey.toString());
+      }
+      const onConnect = (pub) => {
+        const key = pub?.toString?.() || provider.publicKey?.toString?.();
+        if(key){
+          setWallet(key);
+          console.log("Wallet connected via event:", key);
+        }
+      };
+      const onDisconnect = () => {
+        setWallet(null);
+        console.log("Wallet disconnected");
+      };
+      if(provider.on){
+        provider.on("connect", onConnect);
+        provider.on("disconnect", onDisconnect);
+      }
+      return () => {
+        if(provider.off){
+          provider.off("connect", onConnect);
+          provider.off("disconnect", onDisconnect);
+        }
+      };
     };
+
+    // Try immediately
+    const cleanup = setupWallet();
+
+    // If no provider found, retry after wallets load
+    if(!cleanup){
+      const timer = setTimeout(() => {
+        console.log("Retrying wallet detection after delay...");
+        setupWallet();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+
+    return cleanup;
   },[]);
 
   useEffect(() => {
@@ -510,17 +546,25 @@ export default function App() {
     const provider = walletProvider || getProvider();
     if(!provider){
       setStatus("WALLET NOT FOUND");
+      showToast("NO WALLET DETECTED. INSTALL PHANTOM OR SOLFLARE.", "error");
       return;
     }
+    setStatus("CONNECTING...");
     try{
       const res = await provider.connect();
       const key = res?.publicKey?.toString?.() || provider.publicKey?.toString?.();
       if(key){
         setWallet(key);
         setStatus("WALLET CONNECTED");
+        showToast("WALLET CONNECTED", "success");
+      }else{
+        setStatus("CONNECTION FAILED");
+        showToast("WALLET CONNECTION FAILED. NO PUBLIC KEY RECEIVED.", "error");
       }
     }catch(err){
+      console.error("Wallet connection error:", err);
       setStatus("WALLET DENIED");
+      showToast(`CONNECTION DENIED: ${err.message || "User rejected"}`, "error");
     }
   };
 
