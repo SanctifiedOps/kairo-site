@@ -1989,7 +1989,7 @@ const postToTwitter = async ({transmission, cycleIndex, cycleId}) => {
 
 const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   const prior = await getLatestState();
-  await finalizeCycle(prior);
+  const priorReward = await finalizeCycle(prior);
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
   const cycleIndex = prior ? (prior.cycleIndex || 0) + 1 : 0;
@@ -2030,7 +2030,8 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
     memory,
     stanceCounts,
     locked:false,
-    cycleEndsAt
+    cycleEndsAt,
+    reward:priorReward || null
   };
 
   const cycleDoc = {
@@ -2401,6 +2402,28 @@ app.post("/api/admin/cycle", async (req,res) => {
     res.json({ok:true,cycleId:cycle.cycleId});
   }catch(err){
     res.status(500).json({error:"INTERNAL"});
+  }
+});
+
+app.post("/api/admin/test-twitter", async (req,res) => {
+  const key = req.get("x-admin-key") || "";
+  if(!ADMIN_KEY || key !== ADMIN_KEY){
+    return res.status(401).json({error:"UNAUTHORIZED"});
+  }
+  try{
+    const state = await getLatestState();
+    if(!state?.transmission){
+      return res.status(400).json({error:"NO_TRANSMISSION"});
+    }
+    await postToTwitter({
+      transmission:state.transmission,
+      cycleIndex:state.cycleIndex || 0,
+      cycleId:state.cycleId || "test"
+    });
+    res.json({ok:true,message:"Test tweet sent"});
+  }catch(err){
+    logger.error("Test Twitter post failed", {error:err.message});
+    res.status(500).json({error:"TWITTER_POST_FAILED",message:err.message});
   }
 });
 
