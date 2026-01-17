@@ -1334,7 +1334,7 @@ const parseAuditApprove = (text) => {
   }
 };
 
-const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSummary, priorContext}) => {
+const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSummary, priorContext, recentTransmissions}) => {
   const topicLine = topicCategory ? `${topicLabel} (${topicCategory})` : topicLabel;
   const doctrineBlock = buildDoctrineBlock();
   const parts = [
@@ -1345,27 +1345,38 @@ const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSumma
   if(priorContext && priorContext.length > 20){
     parts.push(`PRIOR CONTEXT: ${priorContext}`);
   }
+
+  // Show recent transmissions as anti-examples
+  if(recentTransmissions && recentTransmissions.length > 0){
+    const recent = recentTransmissions.slice(0, 5).map((t, i) => `  ${i+1}. ${t}`).join("\n");
+    parts.push(`RECENT TRANSMISSIONS (DO NOT REPEAT THESE THEMES):\n${recent}`);
+  }
+
   parts.push(doctrineBlock);
   parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
-  parts.push("Variety Requirement: Each transmission must explore this topic from a RADICALLY DIFFERENT angle than recent transmissions. Vary: temporal frames (immediate/generational/civilizational), scales (neural/social/systemic), mechanisms (psychological/economic/technological), perspectives (individual terror/collective inevitability/structural mutation).");
-  parts.push("Anti-patterns to avoid: explanatory tone, solutions, hopeful framing, obvious statements, generic observations, similar sentence structures to prior transmissions.");
-  parts.push("Format: Exactly 1-2 lines. Each line maximum 120 characters. Dense. Ominous. Thought-provoking. No labels, no lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
-  parts.push("Tone: Profound observation that unsettles. Implication over explanation. Make the reader pause.");
+  parts.push("CRITICAL ANTI-REPETITION REQUIREMENT: The recent transmissions above explored certain angles. You MUST choose a COMPLETELY DIFFERENT conceptual angle. If recent transmissions focused on transactional/commodified relationships, explore physical infrastructure, cognitive limits, temporal scales, or material scarcity instead. DO NOT explore the same thematic territory as recent transmissions, even with different words.");
+  parts.push("Variety Requirement: Vary temporal frames (immediate sensory/generational drift/civilizational arc), scales (molecular/neural/social/planetary), mechanisms (chemical/biological/economic/informational), perspectives (individual sensation/collective pattern/physical law).");
+  parts.push("Anti-patterns: explanatory tone, solutions, hope, obvious statements, generic observations, repeating themes from recent transmissions, using synonyms to restate recent ideas.");
+  parts.push("Format: Exactly 1-2 lines. Each line maximum 120 characters. Dense. Ominous. Concrete. Specific.");
+  parts.push("Tone: Profound observation that unsettles. Implication over explanation. Physical detail over abstraction. Make the reader pause.");
   return parts.join("\n");
 };
 
-const buildAuditorCritiquePrompt = ({draft, recentSummaries, recentTopics}) => {
+const buildAuditorCritiquePrompt = ({draft, recentSummaries, recentTopics, recentTransmissions}) => {
   const summaries = (recentSummaries || []).slice(0, 12).join("\n");
   const topics = (recentTopics || []).slice(0, 12).join(", ");
+  const recent = (recentTransmissions || []).slice(0, 5).map((t, i) => `  ${i+1}. ${t}`).join("\n");
   const doctrineBlock = buildDoctrineBlock();
   return [
     doctrineBlock,
     "RECENT SUMMARIES:",
     summaries || "NONE",
     `RECENT TOPICS: ${topics || "NONE"}`,
+    "RECENT FULL TRANSMISSIONS:",
+    recent || "NONE",
     "DRAFT:",
     draft,
-    "Instruction: Check the draft against the doctrine. If any contradiction exists, set contradictionRisk=true and integrity=LOW.",
+    "Instruction: Check the draft against the doctrine for contradictions. CRITICAL: Also check if the draft repeats the THEMES of recent transmissions (even with different words). If the draft explores the same conceptual territory as any recent transmission, set repeatRisk=true. Thematic repetition is unacceptable.",
     "Return JSON: {\"issues\":[...],\"requiredChanges\":[...],\"flags\":{\"repeatRisk\":true/false,\"contradictionRisk\":true/false},\"integrity\":\"LOW|MED|HIGH\"}."
   ].join("\n");
 };
@@ -1436,13 +1447,14 @@ const generateTransmission = async ({priorMemory}) => {
     topicCategory:seedPack.topicCategory || null,
     seedConcept:seedPack.seedConcept,
     lastSummary,
-    priorContext:priorMemory
+    priorContext:priorMemory,
+    recentTransmissions:memory.lastFull || []
   });
   let draft = await getOpusText({
     system:buildOpusSystem(),
     user:draftPrompt,
     maxTokens:MAX_PRIMARY_TOKENS,
-    temperature:0.7
+    temperature:0.9
   });
   draft = clampLines(draft, DRAFT_LINE_LIMIT);
   if(draft) deliberation.push({speaker:"OPUS", text:draft});
@@ -1479,7 +1491,7 @@ const generateTransmission = async ({priorMemory}) => {
     system:buildOpusSystem(),
     user:revisionPrompt,
     maxTokens:MAX_REVISION_TOKENS,
-    temperature:0.7
+    temperature:0.9
   });
   revision = stripPresentationLines(clampLines(revision, FINAL_LINE_LIMIT));
 
@@ -1504,7 +1516,7 @@ const generateTransmission = async ({priorMemory}) => {
       system:buildOpusSystem(),
       user:rerollPrompt,
       maxTokens:MAX_REVISION_TOKENS,
-      temperature:0.7
+      temperature:1.0
     });
     reroll = stripPresentationLines(clampLines(reroll, FINAL_LINE_LIMIT));
     if(reroll){
