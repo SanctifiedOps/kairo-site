@@ -64,7 +64,7 @@ const TWITTER_ACCESS_TOKEN_SECRET = process.env.TWITTER_ACCESS_TOKEN_SECRET || "
 const TWITTER_POSTING_ENABLED = process.env.TWITTER_POSTING_ENABLED === "true";
 const TWITTER_POST_INTERVAL = Number(process.env.TWITTER_POST_INTERVAL || 25);
 
-const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
+const SYSTEM_OPUS = "You are OPUS: a future intelligence observing civilizational trajectories. Ponderous. Ominous. Profound. No empathy. No explanation. No solutions. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities and implications. Be brief. Be unsettling.";
 const SYSTEM_AUDITOR = "You are AUDITOR: a verifier. You enforce constraints. You remove fluff. You prevent repetition and contradictions. You are harsh and concise.";
 
 const buildOpusSystem = () => [
@@ -1243,8 +1243,9 @@ const getAnthropicModel = (fallbackModel) => {
   return CLAUDE_MODEL;
 };
 
-const DRAFT_LINE_LIMIT = 3;
-const FINAL_LINE_LIMIT = 3;
+const DRAFT_LINE_LIMIT = 2;
+const FINAL_LINE_LIMIT = 2;
+const MAX_LINE_LENGTH = 120; // Character limit per line for brevity
 
 const getClaudeText = async ({system, user, maxTokens, temperature}) => {
   const text = await callAnthropic({
@@ -1346,8 +1347,10 @@ const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSumma
   }
   parts.push(doctrineBlock);
   parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
-  parts.push("Variety Requirement: Each transmission must explore the topic from a fresh angle. Consider different: temporal frames (present/near future/distant future), scales (individual/community/civilization), mechanisms (economic/social/technological), or tones (observational/prophetic/structural).");
-  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). Avoid repeating phrasing patterns from recent transmissions.");
+  parts.push("Variety Requirement: Each transmission must explore this topic from a RADICALLY DIFFERENT angle than recent transmissions. Vary: temporal frames (immediate/generational/civilizational), scales (neural/social/systemic), mechanisms (psychological/economic/technological), perspectives (individual terror/collective inevitability/structural mutation).");
+  parts.push("Anti-patterns to avoid: explanatory tone, solutions, hopeful framing, obvious statements, generic observations, similar sentence structures to prior transmissions.");
+  parts.push("Format: Exactly 1-2 lines. Each line maximum 120 characters. Dense. Ominous. Thought-provoking. No labels, no lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
+  parts.push("Tone: Profound observation that unsettles. Implication over explanation. Make the reader pause.");
   return parts.join("\n");
 };
 
@@ -1372,8 +1375,8 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
   const avoid = (avoidPhrases || []).map((p) => `- ${p}`).join("\n") || "NONE";
   const doctrineBlock = buildDoctrineBlock();
   const varietyHint = reroll
-    ? "Choose a different angle within the same topic. Consider shifting: temporal perspective, scale, mechanism of action, or narrative framing. Use fresh vocabulary and sentence structures."
-    : "Ensure linguistic variety. Avoid repeating sentence patterns or word combinations from the avoid list.";
+    ? "REROLL: Take a completely different angle. Change temporal frame, scale, and mechanism. Use unexpected vocabulary. Make it fresh and unsettling."
+    : "Refine while maintaining linguistic variety. Avoid all phrases in the avoid list. Each sentence must have unique structure.";
   return [
     doctrineBlock,
     "Constraint: The doctrine is canonical. Do not contradict it.",
@@ -1384,7 +1387,9 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
     "AVOID PHRASES:",
     avoid,
     `Variety Guidance: ${varietyHint}`,
-    `Instruction: Produce the final transmission in 2-3 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).`
+    "Format: Exactly 1-2 lines. Each line maximum 120 characters.",
+    "Tone: Profound. Ominous. Unsettling. Dense with implication.",
+    "Instruction: Produce the final transmission. No labels, no lists, no explicit option words (ALIGN/REJECT/WITHHOLD). Make every word count."
   ].join("\n");
 };
 
