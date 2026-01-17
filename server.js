@@ -1858,7 +1858,7 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
 
 const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   const prior = await getLatestState();
-  await finalizeCycle(prior);
+  const priorReward = await finalizeCycle(prior);
   const priorMemory = prior?.memory || "";
   const stanceCounts = defaultCounts();
   const cycleIndex = prior ? (prior.cycleIndex || 0) + 1 : 0;
@@ -1899,7 +1899,8 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
     memory,
     stanceCounts,
     locked:false,
-    cycleEndsAt
+    cycleEndsAt,
+    reward:priorReward || null
   };
 
   const cycleDoc = {
