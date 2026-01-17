@@ -10,6 +10,7 @@ import {Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfi
 import bs58 from "bs58";
 import {OnlinePumpSdk} from "@pump-fun/pump-sdk";
 import TelegramBot from "node-telegram-bot-api";
+import {TwitterApi} from "twitter-api-v2";
 
 const app = express();
 app.use(express.json());
@@ -56,6 +57,12 @@ const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID || "";
 const TELEGRAM_VIDEO_PATH = process.env.TELEGRAM_VIDEO_PATH || "./public/assets/kairo-bg.mp4";
 const TELEGRAM_VIDEO_URL = process.env.TELEGRAM_VIDEO_URL || "";
 const TELEGRAM_POSTING_ENABLED = process.env.TELEGRAM_POSTING_ENABLED === "true";
+const TWITTER_API_KEY = process.env.TWITTER_API_KEY || "";
+const TWITTER_API_SECRET = process.env.TWITTER_API_SECRET || "";
+const TWITTER_ACCESS_TOKEN = process.env.TWITTER_ACCESS_TOKEN || "";
+const TWITTER_ACCESS_TOKEN_SECRET = process.env.TWITTER_ACCESS_TOKEN_SECRET || "";
+const TWITTER_POSTING_ENABLED = process.env.TWITTER_POSTING_ENABLED === "true";
+const TWITTER_POST_INTERVAL = Number(process.env.TWITTER_POST_INTERVAL || 25);
 
 const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
 const SYSTEM_AUDITOR = "You are AUDITOR: a verifier. You enforce constraints. You remove fluff. You prevent repetition and contradictions. You are harsh and concise.";
@@ -75,6 +82,14 @@ const buildAuditorSystem = () => [
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY}) : null;
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY}) : null;
 const telegramBot = TELEGRAM_BOT_TOKEN ? new TelegramBot(TELEGRAM_BOT_TOKEN, {polling: false}) : null;
+const twitterClient = (TWITTER_API_KEY && TWITTER_API_SECRET && TWITTER_ACCESS_TOKEN && TWITTER_ACCESS_TOKEN_SECRET)
+  ? new TwitterApi({
+      appKey: TWITTER_API_KEY,
+      appSecret: TWITTER_API_SECRET,
+      accessToken: TWITTER_ACCESS_TOKEN,
+      accessSecret: TWITTER_ACCESS_TOKEN_SECRET
+    })
+  : null;
 let db = null;
 
 const inMem = {
@@ -1065,7 +1080,8 @@ const saveBags = async (bags) => {
     await db.collection("config").doc("bags").set({
       topicsBagRemaining:bags.topicsBag,
       seedBagRemaining:bags.seedBag,
-      lastTopic:bags.lastTopic || null
+      lastTopic:bags.lastTopic || null,
+      lastTopicCategory:bags.lastTopicCategory || null
     }, {merge:true});
     return;
   }
@@ -1082,7 +1098,8 @@ const initBags = (bags, topics, seedConcepts) => {
   return {
     topicsBag:topicsBag.length ? topicsBag : shuffle(topicIds),
     seedBag:seedBag.length ? seedBag : shuffle(seedIds),
-    lastTopic:bags?.lastTopic || null
+    lastTopic:bags?.lastTopic || null,
+    lastTopicCategory:bags?.lastTopicCategory || null
   };
 };
 
@@ -1095,23 +1112,46 @@ const pickSeedPack = async (topicsConfigInput, seedConfigInput) => {
   const seedMap = new Map(seedsList.map((s) => [s.id, s]));
   const rawBags = await loadBags();
   const bags = initBags(rawBags, topicsList, seedsList);
+
   let topicId = null;
-  while(bags.topicsBag.length){
+  const lastCategory = bags.lastTopicCategory || null;
+
+  // Try to pick a topic from a different category than last time for more variety
+  let attempts = 0;
+  while(bags.topicsBag.length && attempts < 10){
     const candidate = bags.topicsBag.shift();
-    if(candidate && candidate !== bags.lastTopic){
-      topicId = candidate;
-      break;
+    const candidateMeta = topicMap.get(candidate);
+    const candidateCategory = candidateMeta?.category || "misc";
+
+    // Skip if same as last topic OR (same category as last AND we have other options)
+    if(candidate === bags.lastTopic){
+      attempts++;
+      continue;
     }
+    if(lastCategory && candidateCategory === lastCategory && bags.topicsBag.length > 5){
+      // Put it back at the end if we have plenty of options left
+      bags.topicsBag.push(candidate);
+      attempts++;
+      continue;
+    }
+    topicId = candidate;
+    break;
   }
+
+  // If we didn't find one, reshuffle and pick fresh
   if(!topicId){
     bags.topicsBag = shuffle(topicsList.map((t) => t.id));
     topicId = bags.topicsBag.shift();
   }
+
+  const topicMeta = topicMap.get(topicId) || {id:topicId, label:topicId, category:"misc", tags:[]};
   bags.lastTopic = topicId;
+  bags.lastTopicCategory = topicMeta.category;
+
   if(!bags.seedBag.length) bags.seedBag = shuffle(seedsList.map((s) => s.id));
   const seedId = bags.seedBag.shift();
   await saveBags(bags);
-  const topicMeta = topicMap.get(topicId) || {id:topicId, label:topicId, category:"misc", tags:[]};
+
   const seedMeta = seedMap.get(seedId) || {id:seedId, label:seedId, tags:[]};
   return {
     topics:[topicMeta.id],
@@ -1306,7 +1346,8 @@ const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSumma
   }
   parts.push(doctrineBlock);
   parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
-  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).");
+  parts.push("Variety Requirement: Each transmission must explore the topic from a fresh angle. Consider different: temporal frames (present/near future/distant future), scales (individual/community/civilization), mechanisms (economic/social/technological), or tones (observational/prophetic/structural).");
+  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). Avoid repeating phrasing patterns from recent transmissions.");
   return parts.join("\n");
 };
 
@@ -1330,6 +1371,9 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
   const changes = (requiredChanges || []).map((c) => `- ${c}`).join("\n") || "NONE";
   const avoid = (avoidPhrases || []).map((p) => `- ${p}`).join("\n") || "NONE";
   const doctrineBlock = buildDoctrineBlock();
+  const varietyHint = reroll
+    ? "Choose a different angle within the same topic. Consider shifting: temporal perspective, scale, mechanism of action, or narrative framing. Use fresh vocabulary and sentence structures."
+    : "Ensure linguistic variety. Avoid repeating sentence patterns or word combinations from the avoid list.";
   return [
     doctrineBlock,
     "Constraint: The doctrine is canonical. Do not contradict it.",
@@ -1339,7 +1383,8 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
     changes,
     "AVOID PHRASES:",
     avoid,
-    `Instruction: Produce the final transmission in 2-3 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). ${reroll ? "Choose a different angle within the same topic." : ""}`
+    `Variety Guidance: ${varietyHint}`,
+    `Instruction: Produce the final transmission in 2-3 lines. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD).`
   ].join("\n");
 };
 
@@ -1819,7 +1864,24 @@ const finalizeCycle = async (state) => {
     at:nowIso(),
     payload:{option, winnerCount:winners.length, counts}
   });
+
+  // Post winner announcement to Telegram
+  await postWinnerToTelegram({
+    winnerOption:option,
+    cycleIndex:state.cycleIndex || 0,
+    cycleId:state.cycleId
+  });
+
   return reward;
+};
+
+const getWinnerMessage = (option) => {
+  const messages = {
+    ALIGN: "Alignment proves fruitful",
+    REJECT: "Rejection bears reward",
+    WITHHOLD: "Withholding from action becomes action in itself"
+  };
+  return messages[option] || "";
 };
 
 const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
@@ -1855,6 +1917,75 @@ const postToTelegram = async ({transmission, cycleIndex, cycleId}) => {
       error: err.message,
       cycleId,
       channelId: TELEGRAM_CHANNEL_ID
+    });
+  }
+};
+
+const postWinnerToTelegram = async ({winnerOption, cycleIndex, cycleId}) => {
+  if(!TELEGRAM_POSTING_ENABLED){
+    logger.debug("Telegram posting disabled");
+    return;
+  }
+  if(!telegramBot || !TELEGRAM_CHANNEL_ID){
+    logger.warn("Telegram not configured for winner announcement", {
+      hasToken:Boolean(TELEGRAM_BOT_TOKEN),
+      channelId:TELEGRAM_CHANNEL_ID
+    });
+    return;
+  }
+
+  try{
+    const winnerMsg = getWinnerMessage(winnerOption);
+    if(!winnerMsg){
+      logger.warn("No winner message for option", {option: winnerOption});
+      return;
+    }
+
+    const message = `${winnerMsg}\n\n#KAIRO #CYCLE${cycleIndex}`;
+
+    await telegramBot.sendMessage(TELEGRAM_CHANNEL_ID, message);
+
+    logger.info("Posted winner to Telegram", {cycleId, cycleIndex, option: winnerOption, channelId: TELEGRAM_CHANNEL_ID});
+  }catch(err){
+    logger.error("Failed to post winner to Telegram", {
+      error: err.message,
+      cycleId,
+      option: winnerOption,
+      channelId: TELEGRAM_CHANNEL_ID
+    });
+  }
+};
+
+const postToTwitter = async ({transmission, cycleIndex, cycleId}) => {
+  if(!TWITTER_POSTING_ENABLED){
+    logger.debug("Twitter posting disabled");
+    return;
+  }
+  if(!twitterClient){
+    logger.warn("Twitter not configured", {
+      hasKeys:Boolean(TWITTER_API_KEY && TWITTER_API_SECRET && TWITTER_ACCESS_TOKEN && TWITTER_ACCESS_TOKEN_SECRET)
+    });
+    return;
+  }
+
+  // Only post every TWITTER_POST_INTERVAL cycles
+  if(cycleIndex % TWITTER_POST_INTERVAL !== 0){
+    logger.debug("Skipping Twitter post - not interval cycle", {cycleIndex, interval:TWITTER_POST_INTERVAL});
+    return;
+  }
+
+  try{
+    const tweetText = `KAIRO TRANSMISSION CYCLE ${cycleIndex}\n\n${transmission}\n\nDo you align, reject or withhold?`;
+
+    // Tweet using v2 API
+    await twitterClient.v2.tweet(tweetText);
+
+    logger.info("Posted to Twitter", {cycleId, cycleIndex});
+  }catch(err){
+    logger.error("Failed to post to Twitter", {
+      error: err.message,
+      cycleId,
+      cycleIndex
     });
   }
 };
@@ -1946,6 +2077,13 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
 
   // Post to Telegram channel
   await postToTelegram({
+    transmission,
+    cycleIndex,
+    cycleId
+  });
+
+  // Post to Twitter every TWITTER_POST_INTERVAL cycles
+  await postToTwitter({
     transmission,
     cycleIndex,
     cycleId
@@ -2081,7 +2219,8 @@ app.get("/api/last", async (req,res) => {
       doctrineVersion:state.doctrineVersion || getDoctrineVersion(),
       locked,
       stanceCounts:state.stanceCounts || defaultCounts(),
-      cycleEndsAt:state.cycleEndsAt || null
+      cycleEndsAt:state.cycleEndsAt || null,
+      reward:state.reward || null
     });
   }catch(err){
     res.status(500).json({error:"INTERNAL"});

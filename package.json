@@ -42,7 +42,8 @@
     "pumpdotfun-sdk": "^1.4.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "serverless-http": "^3.2.0"
+    "serverless-http": "^3.2.0",
+    "twitter-api-v2": "^1.29.0"
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "^2.1.9",

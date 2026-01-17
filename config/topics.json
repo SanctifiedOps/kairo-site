@@ -217,6 +217,356 @@
       "category": "government",
       "tags": ["compliance","economy","control"],
       "severity": 3
+    },
+    {
+      "id": "infrastructure_silent",
+      "label": "Infrastructure fails silently",
+      "category": "technology",
+      "tags": ["infrastructure","failure","dependency"],
+      "severity": 3
+    },
+    {
+      "id": "agent_labor",
+      "label": "Agents compete for work",
+      "category": "ai",
+      "tags": ["agents","labor","automation"],
+      "severity": 3
+    },
+    {
+      "id": "kinship_optional",
+      "label": "Kinship becomes optional",
+      "category": "family",
+      "tags": ["family","bonds","society"],
+      "severity": 2
+    },
+    {
+      "id": "cities_triage",
+      "label": "Cities are triaged, not planned",
+      "category": "urban",
+      "tags": ["cities","planning","scarcity"],
+      "severity": 3
+    },
+    {
+      "id": "water_markets",
+      "label": "Water is traded like oil",
+      "category": "earth",
+      "tags": ["water","resources","markets"],
+      "severity": 3
+    },
+    {
+      "id": "exit_premium",
+      "label": "Exit requires permission",
+      "category": "law",
+      "tags": ["mobility","borders","control"],
+      "severity": 3
+    },
+    {
+      "id": "protocol_sovereignty",
+      "label": "Protocols govern jurisdictions",
+      "category": "crypto",
+      "tags": ["protocols","sovereignty","law"],
+      "severity": 3
+    },
+    {
+      "id": "skill_deprecation",
+      "label": "Skills deprecate faster than learning",
+      "category": "education",
+      "tags": ["learning","obsolescence","work"],
+      "severity": 2
+    },
+    {
+      "id": "loneliness_infrastructure",
+      "label": "Loneliness becomes infrastructure",
+      "category": "human_condition",
+      "tags": ["loneliness","society","scale"],
+      "severity": 2
+    },
+    {
+      "id": "debt_inheritance",
+      "label": "Debt is inherited across generations",
+      "category": "finance",
+      "tags": ["debt","inheritance","inequality"],
+      "severity": 3
+    },
+    {
+      "id": "silence_luxury",
+      "label": "Silence becomes a luxury good",
+      "category": "culture",
+      "tags": ["silence","attention","scarcity"],
+      "severity": 1
+    },
+    {
+      "id": "health_prediction",
+      "label": "Health is predicted, not treated",
+      "category": "health",
+      "tags": ["prediction","prevention","insurance"],
+      "severity": 2
+    },
+    {
+      "id": "speed_tyranny",
+      "label": "Speed becomes tyrannical",
+      "category": "technology",
+      "tags": ["speed","urgency","pressure"],
+      "severity": 2
+    },
+    {
+      "id": "meaning_markets",
+      "label": "Meaning is sold as a service",
+      "category": "culture",
+      "tags": ["meaning","commercialisation","spirituality"],
+      "severity": 2
+    },
+    {
+      "id": "nature_permission",
+      "label": "Nature requires permission to access",
+      "category": "earth",
+      "tags": ["nature","access","privatisation"],
+      "severity": 2
+    },
+    {
+      "id": "tokens_citizenship",
+      "label": "Tokens replace citizenship",
+      "category": "crypto",
+      "tags": ["tokens","identity","membership"],
+      "severity": 3
+    },
+    {
+      "id": "forgetting_illegal",
+      "label": "Forgetting becomes illegal",
+      "category": "surveillance",
+      "tags": ["memory","data","permanence"],
+      "severity": 3
+    },
+    {
+      "id": "children_optimized",
+      "label": "Children are optimised before birth",
+      "category": "family",
+      "tags": ["genetics","optimisation","inequality"],
+      "severity": 3
+    },
+    {
+      "id": "community_subscription",
+      "label": "Community is subscription-based",
+      "category": "culture",
+      "tags": ["community","membership","commerce"],
+      "severity": 2
+    },
+    {
+      "id": "violence_invisible",
+      "label": "Violence operates below perception",
+      "category": "war",
+      "tags": ["violence","stealth","systems"],
+      "severity": 3
+    },
+    {
+      "id": "maintenance_ideology",
+      "label": "Maintenance becomes ideological",
+      "category": "technology",
+      "tags": ["maintenance","infrastructure","politics"],
+      "severity": 1
+    },
+    {
+      "id": "biometric_debt",
+      "label": "Biometrics secure debt, not identity",
+      "category": "surveillance",
+      "tags": ["biometrics","debt","control"],
+      "severity": 3
+    },
+    {
+      "id": "consensus_marketplace",
+      "label": "Consensus is bought and sold",
+      "category": "media",
+      "tags": ["consensus","markets","truth"],
+      "severity": 3
+    },
+    {
+      "id": "privacy_class",
+      "label": "Privacy becomes a class marker",
+      "category": "surveillance",
+      "tags": ["privacy","inequality","class"],
+      "severity": 3
+    },
+    {
+      "id": "time_rationed",
+      "label": "Time becomes rationed",
+      "category": "work",
+      "tags": ["time","scarcity","control"],
+      "severity": 2
+    },
+    {
+      "id": "ritual_automated",
+      "label": "Rituals are automated",
+      "category": "culture",
+      "tags": ["ritual","automation","meaning"],
+      "severity": 1
+    },
+    {
+      "id": "food_synthetic",
+      "label": "Food is synthesised, not grown",
+      "category": "earth",
+      "tags": ["food","agriculture","technology"],
+      "severity": 3
+    },
+    {
+      "id": "care_economy",
+      "label": "Care becomes an extractive economy",
+      "category": "health",
+      "tags": ["care","extraction","commercialisation"],
+      "severity": 3
+    },
+    {
+      "id": "citizenship_performance",
+      "label": "Citizenship requires performance metrics",
+      "category": "government",
+      "tags": ["citizenship","metrics","obligation"],
+      "severity": 3
+    },
+    {
+      "id": "inheritance_conditional",
+      "label": "Inheritance becomes conditional",
+      "category": "family",
+      "tags": ["inheritance","control","obligation"],
+      "severity": 2
+    },
+    {
+      "id": "reputation_permanent",
+      "label": "Reputation becomes permanent",
+      "category": "technology",
+      "tags": ["reputation","permanence","identity"],
+      "severity": 2
+    },
+    {
+      "id": "prediction_governance",
+      "label": "Prediction replaces governance",
+      "category": "ai",
+      "tags": ["prediction","governance","control"],
+      "severity": 3
+    },
+    {
+      "id": "mobility_priced",
+      "label": "Movement is priced dynamically",
+      "category": "urban",
+      "tags": ["mobility","pricing","access"],
+      "severity": 2
+    },
+    {
+      "id": "shelter_volatile",
+      "label": "Shelter becomes volatile",
+      "category": "urban",
+      "tags": ["housing","instability","markets"],
+      "severity": 3
+    },
+    {
+      "id": "emotion_regulated",
+      "label": "Emotions are regulated chemically",
+      "category": "health",
+      "tags": ["emotion","medication","control"],
+      "severity": 2
+    },
+    {
+      "id": "legacy_tokenized",
+      "label": "Legacy is tokenized",
+      "category": "crypto",
+      "tags": ["legacy","tokens","inheritance"],
+      "severity": 2
+    },
+    {
+      "id": "conflict_automated",
+      "label": "Conflict is automated",
+      "category": "war",
+      "tags": ["automation","conflict","escalation"],
+      "severity": 3
+    },
+    {
+      "id": "truth_subscription",
+      "label": "Truth becomes subscription-based",
+      "category": "media",
+      "tags": ["truth","paywalls","access"],
+      "severity": 3
+    },
+    {
+      "id": "soil_exhausted",
+      "label": "Soil is exhausted, land is barren",
+      "category": "earth",
+      "tags": ["soil","agriculture","collapse"],
+      "severity": 3
+    },
+    {
+      "id": "code_jurisdiction",
+      "label": "Code creates jurisdiction",
+      "category": "crypto",
+      "tags": ["code","law","sovereignty"],
+      "severity": 3
+    },
+    {
+      "id": "education_perpetual",
+      "label": "Education becomes perpetual debt",
+      "category": "education",
+      "tags": ["debt","learning","exploitation"],
+      "severity": 3
+    },
+    {
+      "id": "beauty_algorithmic",
+      "label": "Beauty is defined algorithmically",
+      "category": "culture",
+      "tags": ["beauty","algorithms","standards"],
+      "severity": 1
+    },
+    {
+      "id": "friendship_curated",
+      "label": "Friendship is algorithmically curated",
+      "category": "technology",
+      "tags": ["friendship","algorithms","isolation"],
+      "severity": 1
+    },
+    {
+      "id": "dignity_marketplace",
+      "label": "Dignity is traded in markets",
+      "category": "work",
+      "tags": ["dignity","markets","exploitation"],
+      "severity": 3
+    },
+    {
+      "id": "borders_dynamic",
+      "label": "Borders shift dynamically",
+      "category": "government",
+      "tags": ["borders","sovereignty","conflict"],
+      "severity": 3
+    },
+    {
+      "id": "lineage_verified",
+      "label": "Lineage requires verification",
+      "category": "family",
+      "tags": ["lineage","verification","identity"],
+      "severity": 2
+    },
+    {
+      "id": "presence_taxed",
+      "label": "Physical presence is taxed",
+      "category": "urban",
+      "tags": ["presence","taxation","space"],
+      "severity": 2
+    },
+    {
+      "id": "obsolescence_planned",
+      "label": "Obsolescence is enforced",
+      "category": "technology",
+      "tags": ["obsolescence","waste","control"],
+      "severity": 2
+    },
+    {
+      "id": "agency_leased",
+      "label": "Agency is leased, not owned",
+      "category": "human_condition",
+      "tags": ["agency","dependency","control"],
+      "severity": 3
+    },
+    {
+      "id": "wilderness_extinct",
+      "label": "Wilderness becomes extinct",
+      "category": "earth",
+      "tags": ["wilderness","extinction","loss"],
+      "severity": 3
     }
   ]
 }
