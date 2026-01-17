@@ -1941,7 +1941,7 @@ const postWinnerToTelegram = async ({winnerOption, cycleIndex, cycleId}) => {
       return;
     }
 
-    const message = `${winnerMsg}\n\n#KAIRO #CYCLE${cycleIndex}`;
+    const message = `TRANSMISSION - CYCLE ${cycleIndex}\n\n${winnerMsg}\n\n#KAIRO #CYCLE${cycleIndex}`;
 
     await telegramBot.sendMessage(TELEGRAM_CHANNEL_ID, message);
 
