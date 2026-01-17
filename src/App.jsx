@@ -555,12 +555,34 @@ export default function App() {
       isPhantom: provider.isPhantom,
       isSolflare: provider.isSolflare,
       isConnected: provider.isConnected,
-      hasPublicKey: !!provider.publicKey
+      hasPublicKey: !!provider.publicKey,
+      publicKeyValue: provider.publicKey?.toString()
     });
+
+    // If already connected, just use the existing connection
+    if(provider.isConnected && provider.publicKey){
+      const walletAddress = provider.publicKey.toString();
+      console.log("Wallet already connected, using existing connection:", walletAddress);
+      setWallet(walletAddress);
+      setStatus("WALLET CONNECTED");
+      showToast("WALLET CONNECTED", "success");
+      return;
+    }
 
     setStatus("CONNECTING...");
     try{
-      // Standard Phantom/Solflare connection - no parameters needed
+      // Disconnect first if wallet thinks it's connected but we don't have the key
+      if(provider.isConnected && !provider.publicKey){
+        console.log("Wallet is connected but no public key, disconnecting first...");
+        try{
+          await provider.disconnect();
+        }catch(e){
+          console.log("Disconnect error (ignoring):", e);
+        }
+      }
+
+      // Standard Phantom/Solflare connection
+      console.log("Calling provider.connect()...");
       const resp = await provider.connect();
       console.log("Connect response:", resp);
 
@@ -578,6 +600,11 @@ export default function App() {
       showToast("WALLET CONNECTED", "success");
     }catch(err){
       console.error("Wallet connection failed:", err);
+      console.error("Error type:", typeof err);
+      console.error("Error keys:", Object.keys(err));
+      console.error("Error code:", err.code);
+      console.error("Error message:", err.message);
+      console.error("Error name:", err.name);
 
       // Handle specific error cases
       let errorMsg = "CONNECTION FAILED";
@@ -586,12 +613,15 @@ export default function App() {
         errorMsg = "USER REJECTED CONNECTION";
       }else if(err.message?.toLowerCase().includes("already pending")){
         errorMsg = "CONNECTION ALREADY PENDING. CHECK WALLET POPUP.";
+      }else if(err.message?.toLowerCase().includes("already processing")){
+        errorMsg = "ALREADY CONNECTING. CHECK WALLET EXTENSION.";
       }else if(err.message){
         errorMsg = `ERROR: ${err.message}`;
       }
 
       setStatus("CONNECTION FAILED");
       showToast(errorMsg, "error");
+      showToast("TRY: 1) Unlock Phantom 2) Refresh page 3) Click connect", "warning");
     }
   };
 
