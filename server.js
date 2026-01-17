@@ -10,6 +10,7 @@ import {Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfi
 import bs58 from "bs58";
 import {OnlinePumpSdk} from "@pump-fun/pump-sdk";
 import TelegramBot from "node-telegram-bot-api";
+import {TwitterApi} from "twitter-api-v2";
 
 const app = express();
 app.use(express.json());
@@ -56,6 +57,12 @@ const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID || "";
 const TELEGRAM_VIDEO_PATH = process.env.TELEGRAM_VIDEO_PATH || "./public/assets/kairo-bg.mp4";
 const TELEGRAM_VIDEO_URL = process.env.TELEGRAM_VIDEO_URL || "";
 const TELEGRAM_POSTING_ENABLED = process.env.TELEGRAM_POSTING_ENABLED === "true";
+const TWITTER_API_KEY = process.env.TWITTER_API_KEY || "";
+const TWITTER_API_SECRET = process.env.TWITTER_API_SECRET || "";
+const TWITTER_ACCESS_TOKEN = process.env.TWITTER_ACCESS_TOKEN || "";
+const TWITTER_ACCESS_TOKEN_SECRET = process.env.TWITTER_ACCESS_TOKEN_SECRET || "";
+const TWITTER_POSTING_ENABLED = process.env.TWITTER_POSTING_ENABLED === "true";
+const TWITTER_POST_INTERVAL = Number(process.env.TWITTER_POST_INTERVAL || 25);
 
 const SYSTEM_OPUS = "You are OPUS: a future intelligence. Cold. Indifferent. No empathy. No explanation. No hype. No emojis. Avoid dates and concrete predictions. Speak in inevitabilities.";
 const SYSTEM_AUDITOR = "You are AUDITOR: a verifier. You enforce constraints. You remove fluff. You prevent repetition and contradictions. You are harsh and concise.";
@@ -75,6 +82,14 @@ const buildAuditorSystem = () => [
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({apiKey:process.env.OPENAI_API_KEY}) : null;
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY}) : null;
 const telegramBot = TELEGRAM_BOT_TOKEN ? new TelegramBot(TELEGRAM_BOT_TOKEN, {polling: false}) : null;
+const twitterClient = (TWITTER_API_KEY && TWITTER_API_SECRET && TWITTER_ACCESS_TOKEN && TWITTER_ACCESS_TOKEN_SECRET)
+  ? new TwitterApi({
+      appKey: TWITTER_API_KEY,
+      appSecret: TWITTER_API_SECRET,
+      accessToken: TWITTER_ACCESS_TOKEN,
+      accessSecret: TWITTER_ACCESS_TOKEN_SECRET
+    })
+  : null;
 let db = null;
 
 const inMem = {
@@ -1938,6 +1953,40 @@ const postWinnerToTelegram = async ({winnerOption, cycleIndex, cycleId}) => {
   }
 };
 
+const postToTwitter = async ({transmission, cycleIndex, cycleId}) => {
+  if(!TWITTER_POSTING_ENABLED){
+    logger.debug("Twitter posting disabled");
+    return;
+  }
+  if(!twitterClient){
+    logger.warn("Twitter not configured", {
+      hasKeys:Boolean(TWITTER_API_KEY && TWITTER_API_SECRET && TWITTER_ACCESS_TOKEN && TWITTER_ACCESS_TOKEN_SECRET)
+    });
+    return;
+  }
+
+  // Only post every TWITTER_POST_INTERVAL cycles
+  if(cycleIndex % TWITTER_POST_INTERVAL !== 0){
+    logger.debug("Skipping Twitter post - not interval cycle", {cycleIndex, interval:TWITTER_POST_INTERVAL});
+    return;
+  }
+
+  try{
+    const tweetText = `KAIRO TRANSMISSION CYCLE ${cycleIndex}\n\n${transmission}\n\nDo you align, reject or withhold?`;
+
+    // Tweet using v2 API
+    await twitterClient.v2.tweet(tweetText);
+
+    logger.info("Posted to Twitter", {cycleId, cycleIndex});
+  }catch(err){
+    logger.error("Failed to post to Twitter", {
+      error: err.message,
+      cycleId,
+      cycleIndex
+    });
+  }
+};
+
 const generateCycle = async ({seed, createdBy, cycleWindow}) => {
   const prior = await getLatestState();
   await finalizeCycle(prior);
@@ -2024,6 +2073,13 @@ const generateCycle = async ({seed, createdBy, cycleWindow}) => {
 
   // Post to Telegram channel
   await postToTelegram({
+    transmission,
+    cycleIndex,
+    cycleId
+  });
+
+  // Post to Twitter every TWITTER_POST_INTERVAL cycles
+  await postToTwitter({
     transmission,
     cycleIndex,
     cycleId
