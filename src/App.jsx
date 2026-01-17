@@ -87,13 +87,13 @@ export default function App() {
   const tagline = "EVERYTHING YOU SEE IS RESIDUAL";
   const caValue = "CA: PENDING";
 
-  const showToast = (message, type = "info") => {
+  const showToast = (message, type = "info", duration = 4000, isWinner = false) => {
     const id = Date.now();
-    const toast = {id, message, type};
+    const toast = {id, message, type, isWinner};
     setToasts(prev => [...prev, toast]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+    }, duration);
   };
 
   const triggerGlitch = () => {
@@ -270,7 +270,7 @@ export default function App() {
     lastWinnerCycleRef.current = transmission.cycleId;
     const winnerMsg = getWinnerMessage(transmission.reward.option);
     if(winnerMsg){
-      showToast(winnerMsg, "success");
+      showToast(winnerMsg, "success", 10000, true);
     }
   },[transmission?.reward?.option, transmission?.cycleId]);
 
@@ -795,7 +795,7 @@ export default function App() {
 
       <div className="toastContainer" aria-live="polite" aria-atomic="true">
         {toasts.map((toast) => (
-          <div key={toast.id} className={`toast toast-${toast.type}`}>
+          <div key={toast.id} className={`toast toast-${toast.type}${toast.isWinner ? ' toast-winner' : ''}`}>
             <div className="toastMessage">{toast.message}</div>
           </div>
         ))}
