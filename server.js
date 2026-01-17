@@ -1333,21 +1333,28 @@ const parseAuditApprove = (text) => {
   }
 };
 
-const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, lastSummary, priorContext}) => {
+const buildOpusDraftPrompt = ({topicLabel, topicCategory, seedConcept, recentSummaries, priorContext}) => {
   const topicLine = topicCategory ? `${topicLabel} (${topicCategory})` : topicLabel;
   const doctrineBlock = buildDoctrineBlock();
   const parts = [
     `TOPIC: ${topicLine}`,
-    `SEED: ${seedConcept}`,
-    `LAST SUMMARY: ${lastSummary || "NONE"}`
+    `SEED: ${seedConcept}`
   ];
+
+  // Show recent summaries to explicitly diverge from
+  if(recentSummaries && recentSummaries.length > 0){
+    const recent = recentSummaries.slice(0, 3).join(" | ");
+    parts.push(`RECENT THEMES TO AVOID: ${recent}`);
+  }
+
   if(priorContext && priorContext.length > 20){
     parts.push(`PRIOR CONTEXT: ${priorContext}`);
   }
   parts.push(doctrineBlock);
   parts.push("Constraint: The doctrine is canonical. Do not contradict it.");
-  parts.push("Variety Requirement: Each transmission must explore the topic from a fresh angle. Consider different: temporal frames (present/near future/distant future), scales (individual/community/civilization), mechanisms (economic/social/technological), or tones (observational/prophetic/structural).");
-  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). Avoid repeating phrasing patterns from recent transmissions.");
+  parts.push("Mandatory Diversity Requirement: You MUST explore this topic from a completely different thematic angle than recent transmissions. Do NOT revisit recent themes, concepts, or emotional territories. If recent transmissions explored human connection, explore systems or economics. If they were abstract, be concrete. If they were individual-scale, go structural or civilizational.");
+  parts.push("Approach Variation: Consider: temporal frames (present/near future/distant future), scales (individual/community/civilization/species), mechanisms (economic/technological/biological/social), tones (clinical/prophetic/observational), or perspectives (victim/architect/witness/beneficiary).");
+  parts.push("Instruction: Draft 2-3 short lines as a single transmission. No labels, no bullet or numbered lists, no explicit option words (ALIGN/REJECT/WITHHOLD). Avoid repeating phrasing patterns or thematic territory from recent transmissions.");
   return parts.join("\n");
 };
 
@@ -1363,6 +1370,7 @@ const buildAuditorCritiquePrompt = ({draft, recentSummaries, recentTopics}) => {
     "DRAFT:",
     draft,
     "Instruction: Check the draft against the doctrine. If any contradiction exists, set contradictionRisk=true and integrity=LOW.",
+    "Semantic Diversity Check: If the draft explores similar THEMES, EMOTIONS, or CONCEPTUAL TERRITORY as recent summaries (e.g., multiple transmissions about empathy, connection, loneliness, or human relationships), set repeatRisk=true even if the exact phrases differ. Thematic repetition is still repetition.",
     "Return JSON: {\"issues\":[...],\"requiredChanges\":[...],\"flags\":{\"repeatRisk\":true/false,\"contradictionRisk\":true/false},\"integrity\":\"LOW|MED|HIGH\"}."
   ].join("\n");
 };
@@ -1372,8 +1380,8 @@ const buildOpusRevisionPrompt = ({draft, requiredChanges, avoidPhrases, reroll})
   const avoid = (avoidPhrases || []).map((p) => `- ${p}`).join("\n") || "NONE";
   const doctrineBlock = buildDoctrineBlock();
   const varietyHint = reroll
-    ? "Choose a different angle within the same topic. Consider shifting: temporal perspective, scale, mechanism of action, or narrative framing. Use fresh vocabulary and sentence structures."
-    : "Ensure linguistic variety. Avoid repeating sentence patterns or word combinations from the avoid list.";
+    ? "MANDATORY REWRITE: The draft was rejected for thematic repetition. You MUST choose a radically different angle within the same topic. Shift: temporal perspective (present→future or vice versa), scale (individual→civilization or vice versa), mechanism (social→economic→technological), tone (observational→prophetic→clinical), or perspective (victim→architect→observer). Use completely fresh vocabulary, sentence structures, and conceptual framing. If draft was emotional/interpersonal, go structural/systemic. If abstract, be concrete. If macro, go micro."
+    : "Ensure linguistic and thematic variety. Avoid repeating sentence patterns, word combinations, or conceptual angles from the avoid list.";
   return [
     doctrineBlock,
     "Constraint: The doctrine is canonical. Do not contradict it.",
@@ -1423,14 +1431,13 @@ const generateTransmission = async ({priorMemory}) => {
   const topicsList = topicsConfig.topics || [];
   const topicLabelMap = new Map(topicsList.map((t) => [t.id, t.label || t.id]));
   const seedPack = await pickSeedPack(topicsConfig, seedConfig);
-  const lastSummary = memory.lastSummaries[0] || "NONE";
   const deliberation = [];
 
   const draftPrompt = buildOpusDraftPrompt({
     topicLabel:seedPack.topicLabel || (seedPack.topics[0] ? topicLabelMap.get(seedPack.topics[0]) : "UNKNOWN"),
     topicCategory:seedPack.topicCategory || null,
     seedConcept:seedPack.seedConcept,
-    lastSummary,
+    recentSummaries:memory.lastSummaries,
     priorContext:priorMemory
   });
   let draft = await getOpusText({
