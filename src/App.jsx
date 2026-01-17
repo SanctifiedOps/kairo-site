@@ -547,55 +547,47 @@ export default function App() {
     if(!provider){
       setStatus("WALLET NOT FOUND");
       showToast("NO WALLET DETECTED. INSTALL PHANTOM OR SOLFLARE.", "error");
+      console.log("No wallet provider available");
       return;
     }
 
-    // Check if wallet is locked
-    if(provider.isConnected === false && !provider.publicKey){
-      console.log("Wallet appears to be locked or not initialized");
-    }
+    console.log("Attempting to connect to wallet...", {
+      isPhantom: provider.isPhantom,
+      isSolflare: provider.isSolflare,
+      isConnected: provider.isConnected,
+      hasPublicKey: !!provider.publicKey
+    });
 
     setStatus("CONNECTING...");
     try{
-      // Some wallets need explicit permission request
-      if(provider.connect){
-        const res = await provider.connect({onlyIfTrusted: false});
-        const key = res?.publicKey?.toString?.() || provider.publicKey?.toString?.();
-        if(key){
-          setWallet(key);
-          setStatus("WALLET CONNECTED");
-          showToast("WALLET CONNECTED", "success");
-          console.log("Wallet connected successfully:", key);
-        }else{
-          setStatus("CONNECTION FAILED");
-          showToast("WALLET CONNECTION FAILED. NO PUBLIC KEY RECEIVED.", "error");
-          console.error("Connection succeeded but no public key returned");
-        }
-      }else{
-        setStatus("WALLET ERROR");
-        showToast("WALLET DOES NOT SUPPORT CONNECT METHOD.", "error");
-      }
-    }catch(err){
-      console.error("Wallet connection error:", err);
-      console.error("Error details:", {
-        message: err.message,
-        code: err.code,
-        name: err.name,
-        stack: err.stack
-      });
+      // Standard Phantom/Solflare connection - no parameters needed
+      const resp = await provider.connect();
+      console.log("Connect response:", resp);
 
-      // More specific error messages
-      let errorMsg = "CONNECTION DENIED";
-      if(err.message?.includes("User rejected")){
-        errorMsg = "USER REJECTED CONNECTION REQUEST";
-      }else if(err.message?.includes("Unexpected error")){
-        errorMsg = "UNLOCK YOUR WALLET AND TRY AGAIN";
-      }else if(err.code === 4001){
-        errorMsg = "USER REJECTED CONNECTION REQUEST";
-      }else if(err.code === -32603){
-        errorMsg = "WALLET LOCKED. UNLOCK AND RETRY";
-      }else{
-        errorMsg = `ERROR: ${err.message || "UNKNOWN"}`;
+      // Get public key from response or provider
+      const publicKey = resp?.publicKey || provider.publicKey;
+      if(!publicKey){
+        throw new Error("No public key returned from wallet");
+      }
+
+      const walletAddress = publicKey.toString();
+      console.log("Wallet connected successfully:", walletAddress);
+
+      setWallet(walletAddress);
+      setStatus("WALLET CONNECTED");
+      showToast("WALLET CONNECTED", "success");
+    }catch(err){
+      console.error("Wallet connection failed:", err);
+
+      // Handle specific error cases
+      let errorMsg = "CONNECTION FAILED";
+
+      if(err.code === 4001 || err.message?.toLowerCase().includes("user rejected")){
+        errorMsg = "USER REJECTED CONNECTION";
+      }else if(err.message?.toLowerCase().includes("already pending")){
+        errorMsg = "CONNECTION ALREADY PENDING. CHECK WALLET POPUP.";
+      }else if(err.message){
+        errorMsg = `ERROR: ${err.message}`;
       }
 
       setStatus("CONNECTION FAILED");
