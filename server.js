@@ -1794,11 +1794,14 @@ const finalizeCycle = async (state) => {
   const counts = state.stanceCounts || defaultCounts();
   const option = selectWeightedRandomOption(counts);
   const actors = await fetchStancesByOption(state.cycleId, option);
+  const winners = actors.length > 0
+    ? pickRandomGroup(actors, Math.min(WINNERS_PER_CYCLE, actors.length))
+    : [];
+
   if(actors.length === 0){
-    logger.warn("No actors found for winning option", {cycleId:state.cycleId, option});
-    return null;
+    logger.info("No voters this cycle, selecting winner for narrative continuity", {cycleId:state.cycleId, option});
   }
-  const winners = pickRandomGroup(actors, Math.min(WINNERS_PER_CYCLE, actors.length));
+
   const reward = {
     option,
     winners,
