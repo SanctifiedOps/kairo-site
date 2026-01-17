@@ -1834,7 +1834,8 @@ const finalizeCycle = async (state) => {
   const existing = await getCycleDoc(state.cycleId);
   if(existing?.reward?.finalized){
     await distributeCreatorFees({cycleId:state.cycleId, reward:existing.reward});
-    return null;
+    // Return existing reward so it can be included in the new cycle state
+    return existing.reward;
   }
   const counts = state.stanceCounts || defaultCounts();
   const option = selectWeightedRandomOption(counts);
@@ -1866,11 +1867,15 @@ const finalizeCycle = async (state) => {
   });
 
   // Post winner announcement to Telegram
-  await postWinnerToTelegram({
-    winnerOption:option,
-    cycleIndex:state.cycleIndex || 0,
-    cycleId:state.cycleId
-  });
+  try {
+    await postWinnerToTelegram({
+      winnerOption:option,
+      cycleIndex:state.cycleIndex || 0,
+      cycleId:state.cycleId
+    });
+  } catch(err) {
+    logger.error("Failed to post winner to Telegram in finalizeCycle", {error: err.message, cycleId: state.cycleId});
+  }
 
   return reward;
 };
@@ -2427,6 +2432,30 @@ app.post("/api/admin/test-twitter", async (req,res) => {
   }catch(err){
     logger.error("Test Twitter post failed", {error:err.message});
     res.status(500).json({error:"TWITTER_POST_FAILED",message:err.message});
+  }
+});
+
+app.post("/api/admin/test-telegram-winner", async (req,res) => {
+  const key = req.get("x-admin-key") || "";
+  if(!ADMIN_KEY || key !== ADMIN_KEY){
+    return res.status(401).json({error:"UNAUTHORIZED"});
+  }
+  try{
+    const state = await getLatestState();
+    if(!state){
+      return res.status(400).json({error:"NO_STATE"});
+    }
+    // Test with all three winner options
+    const testOption = req.body?.option || "ALIGN";
+    await postWinnerToTelegram({
+      winnerOption:testOption,
+      cycleIndex:state.cycleIndex || 0,
+      cycleId:state.cycleId || "test"
+    });
+    res.json({ok:true,message:`Test winner announcement sent for ${testOption}`});
+  }catch(err){
+    logger.error("Test Telegram winner post failed", {error:err.message});
+    res.status(500).json({error:"TELEGRAM_POST_FAILED",message:err.message});
   }
 });
 
