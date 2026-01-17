@@ -2265,6 +2265,28 @@ app.post("/api/admin/cycle", async (req,res) => {
   }
 });
 
+app.post("/api/admin/test-twitter", async (req,res) => {
+  const key = req.get("x-admin-key") || "";
+  if(!ADMIN_KEY || key !== ADMIN_KEY){
+    return res.status(401).json({error:"UNAUTHORIZED"});
+  }
+  try{
+    const state = await getLatestState();
+    if(!state?.transmission){
+      return res.status(400).json({error:"NO_TRANSMISSION"});
+    }
+    await postToTwitter({
+      transmission:state.transmission,
+      cycleIndex:state.cycleIndex || 0,
+      cycleId:state.cycleId || "test"
+    });
+    res.json({ok:true,message:"Test tweet sent"});
+  }catch(err){
+    logger.error("Test Twitter post failed", {error:err.message});
+    res.status(500).json({error:"TWITTER_POST_FAILED",message:err.message});
+  }
+});
+
 app.get("/api/health", async (req,res) => {
   const checks = {
     timestamp:nowIso(),
